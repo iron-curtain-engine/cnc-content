@@ -199,6 +199,9 @@ fn try_download(
     Ok(total)
 }
 
+/// Extracts a ZIP archive into `content_root`, validating every entry name
+/// against a [`strict_path::PathBoundary`] to prevent Zip Slip
+/// (CVE-2018-1000178).
 fn extract_zip(
     zip_path: &Path,
     content_root: &Path,
@@ -208,6 +211,11 @@ fn extract_zip(
     let mut archive = zip::ZipArchive::new(io::BufReader::new(file))
         .map_err(|e| DownloadError::Zip(e.to_string()))?;
 
+    // PathBoundary ensures ZIP entry names (untrusted, from network) cannot
+    // escape content_root via path traversal (Zip Slip — CVE-2018-1000178).
+    let boundary = strict_path::PathBoundary::<()>::try_new_create(content_root)
+        .map_err(|e| DownloadError::Zip(format!("failed to create content boundary: {e}")))?;
+
     let total = archive.len();
     let mut files = 0;
 
@@ -216,26 +224,183 @@ fn extract_zip(
             .by_index(i)
             .map_err(|e| DownloadError::Zip(e.to_string()))?;
 
-        let name = entry.name().to_string();
-        if name.ends_with('/') {
+        let archive_entry_name = entry.name().to_string();
+        if archive_entry_name.ends_with('/') {
             continue;
         }
 
         on_progress(DownloadProgress::Extracting {
-            entry: name.clone(),
+            entry: archive_entry_name.clone(),
             index: i,
             total,
         });
 
-        let dest = content_root.join(&name);
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent)?;
-        }
+        // Validate the untrusted archive entry name against our boundary.
+        let dest = boundary.strict_join(&archive_entry_name).map_err(|e| {
+            DownloadError::Zip(format!(
+                "blocked path traversal in ZIP entry \"{archive_entry_name}\": {e}"
+            ))
+        })?;
 
-        let mut out = fs::File::create(&dest)?;
+        dest.create_parent_dir_all()?;
+        let mut out = dest.create_file()?;
         io::copy(&mut entry, &mut out)?;
         files += 1;
     }
 
     Ok(files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Creates an in-memory ZIP archive and writes it to `dest`.
+    /// `entries` is a list of `(name, content)` tuples where `name` may
+    /// contain path traversal sequences for security testing.
+    fn create_test_zip(dest: &Path, entries: &[(&str, &[u8])]) {
+        let file = fs::File::create(dest).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for &(name, data) in entries {
+            writer.start_file(name, options).unwrap();
+            writer.write_all(data).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+
+    fn noop_progress(_: DownloadProgress) {}
+
+    // ── Security tests: Zip Slip (CVE-2018-1000178) ─────────────────
+
+    #[test]
+    fn extract_zip_rejects_dot_dot_slash_traversal() {
+        let tmp = std::env::temp_dir().join("cnc-zip-slip-dotdot");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let zip_path = tmp.join("malicious.zip");
+        create_test_zip(&zip_path, &[("../../etc/passwd", b"pwned")]);
+
+        let content_root = tmp.join("content");
+        fs::create_dir_all(&content_root).unwrap();
+
+        let result = extract_zip(&zip_path, &content_root, &mut noop_progress);
+        assert!(result.is_err(), "should reject ../.. traversal");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("blocked path traversal") || err.contains("Escapes"),
+            "error should mention traversal: {err}"
+        );
+
+        // The escaped file must NOT exist.
+        assert!(
+            !tmp.join("etc/passwd").exists(),
+            "traversal payload must not be written"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn extract_zip_rejects_absolute_path_entry() {
+        let tmp = std::env::temp_dir().join("cnc-zip-slip-abs");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let zip_path = tmp.join("malicious.zip");
+        // Absolute path — should be rejected.
+        create_test_zip(&zip_path, &[("/etc/shadow", b"pwned")]);
+
+        let content_root = tmp.join("content");
+        fs::create_dir_all(&content_root).unwrap();
+
+        let result = extract_zip(&zip_path, &content_root, &mut noop_progress);
+        assert!(result.is_err(), "should reject absolute path entry");
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn extract_zip_rejects_backslash_traversal() {
+        let tmp = std::env::temp_dir().join("cnc-zip-slip-backslash");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let zip_path = tmp.join("malicious.zip");
+        // Mixed separators — a common evasion technique.
+        create_test_zip(&zip_path, &[("..\\..\\etc\\passwd", b"pwned")]);
+
+        let content_root = tmp.join("content");
+        fs::create_dir_all(&content_root).unwrap();
+
+        let result = extract_zip(&zip_path, &content_root, &mut noop_progress);
+        assert!(result.is_err(), "should reject backslash traversal");
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn extract_zip_accepts_valid_entries() {
+        let tmp = std::env::temp_dir().join("cnc-zip-valid");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let zip_path = tmp.join("valid.zip");
+        create_test_zip(
+            &zip_path,
+            &[
+                ("allies.mix", b"fake-mix-data"),
+                ("expand/expand2.mix", b"fake-expand"),
+                ("movies/ally1.vqa", b"fake-vqa"),
+            ],
+        );
+
+        let content_root = tmp.join("content");
+        fs::create_dir_all(&content_root).unwrap();
+
+        let count = extract_zip(&zip_path, &content_root, &mut noop_progress)
+            .expect("valid ZIP should extract successfully");
+        assert_eq!(count, 3);
+        assert!(content_root.join("allies.mix").exists());
+        assert!(content_root.join("expand/expand2.mix").exists());
+        assert!(content_root.join("movies/ally1.vqa").exists());
+
+        // Verify content is correct.
+        assert_eq!(
+            fs::read(content_root.join("allies.mix")).unwrap(),
+            b"fake-mix-data"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn extract_zip_rejects_mixed_valid_and_malicious() {
+        let tmp = std::env::temp_dir().join("cnc-zip-slip-mixed");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let zip_path = tmp.join("mixed.zip");
+        create_test_zip(
+            &zip_path,
+            &[("good.mix", b"safe"), ("../../evil.txt", b"pwned")],
+        );
+
+        let content_root = tmp.join("content");
+        fs::create_dir_all(&content_root).unwrap();
+
+        let result = extract_zip(&zip_path, &content_root, &mut noop_progress);
+        // The malicious entry should cause failure.
+        assert!(
+            result.is_err(),
+            "should fail on malicious entry in mixed ZIP"
+        );
+
+        // The escaped file must not exist.
+        assert!(!tmp.join("evil.txt").exists());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
 }

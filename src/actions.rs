@@ -5,7 +5,8 @@
 //!
 //! Each action maps to one of the operations OpenRA's install system supports:
 //! Copy, ExtractMix, ExtractIscab (InstallShield CAB), ExtractRaw, ExtractZip,
-//! and Delete.
+//! and Delete. All types use `&'static` references so recipe data can be
+//! compile-time constants.
 
 /// A single file mapping: source path → target path (relative to content root).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,15 +39,15 @@ pub enum InstallAction {
     /// Copy files from source to managed storage.
     Copy {
         /// File mappings (source-relative → content-relative).
-        files: Vec<FileMapping>,
+        files: &'static [FileMapping],
     },
 
-    /// Extract named entries from a MIX archive.
+    /// Extract named entries from a MIX archive in the source directory.
     ExtractMix {
         /// Path to the MIX file, relative to the source root.
         source_mix: &'static str,
         /// Entries to extract (MIX entry name → content-relative path).
-        entries: Vec<FileMapping>,
+        entries: &'static [FileMapping],
     },
 
     /// Extract files from an InstallShield CAB archive (The First Decade).
@@ -54,21 +55,33 @@ pub enum InstallAction {
         /// Path to the `.hdr` header file, relative to the source root.
         header: &'static str,
         /// Volume files: (volume index, path relative to source root).
-        volumes: Vec<(u32, &'static str)>,
+        volumes: &'static [(u32, &'static str)],
         /// Entries to extract (CAB entry name → content-relative path).
-        entries: Vec<FileMapping>,
+        entries: &'static [FileMapping],
     },
 
     /// Extract raw byte ranges from a file (e.g. Aftermath PATCH.RTP).
     ExtractRaw {
         /// Individual byte-range extraction entries.
-        entries: Vec<RawExtractEntry>,
+        entries: &'static [RawExtractEntry],
     },
 
     /// Extract entries from a ZIP archive (HTTP downloads).
     ExtractZip {
         /// Entries to extract (ZIP entry name → content-relative path).
-        entries: Vec<FileMapping>,
+        entries: &'static [FileMapping],
+    },
+
+    /// Extract entries from a MIX archive already in the content root.
+    ///
+    /// Used for nested extraction: first extract a MIX from a source MIX into
+    /// the content root (via `ExtractMix`), then extract individual files from
+    /// that intermediate MIX (via this action).
+    ExtractMixFromContent {
+        /// Path to the MIX file, relative to the content root.
+        content_mix: &'static str,
+        /// Entries to extract (MIX entry name → content-relative path).
+        entries: &'static [FileMapping],
     },
 
     /// Delete a temporary file created by a previous action.

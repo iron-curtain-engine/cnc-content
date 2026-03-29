@@ -46,6 +46,8 @@ pub mod downloader;
 pub mod downloads;
 pub mod executor;
 pub mod packages;
+pub mod recipes;
+pub mod source;
 pub mod sources;
 pub mod verify;
 
@@ -106,7 +108,7 @@ pub enum SourceId {
 /// Identifies an HTTP download package.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DownloadId {
-    /// Quick-install base files (freeware mirrors).
+    /// Quick-install base files (OpenRA freeware mirrors).
     QuickInstall,
     /// Base content files.
     BaseFiles,
@@ -114,6 +116,16 @@ pub enum DownloadId {
     Aftermath,
     /// C&C desert tileset.
     CncDesert,
+    /// Red Alert score music (scores.mix) — IC-hosted freeware.
+    Music,
+    /// Allied campaign movies (.vqa) — IC-hosted freeware.
+    MoviesAllied,
+    /// Soviet campaign movies (.vqa) — IC-hosted freeware.
+    MoviesSoviet,
+    /// Counterstrike expansion music — IC-hosted freeware.
+    MusicCounterstrike,
+    /// Aftermath expansion music — IC-hosted freeware.
+    MusicAftermath,
 }
 
 /// Type of content source for platform-specific probe routing.
@@ -192,16 +204,16 @@ pub enum PlatformHint {
     },
 }
 
-/// An install recipe — a named sequence of actions that extracts content from
-/// a source into the managed content directory.
+/// An install recipe — a named sequence of actions that extracts a specific
+/// package from a specific source into the managed content directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallRecipe {
     /// Which source this recipe applies to.
     pub source: SourceId,
-    /// Which packages this recipe provides.
-    pub provides: &'static [PackageId],
+    /// Which package this recipe installs.
+    pub package: PackageId,
     /// Ordered list of install actions to execute.
-    pub actions: Vec<actions::InstallAction>,
+    pub actions: &'static [actions::InstallAction],
 }
 
 /// An HTTP download package definition.
@@ -245,12 +257,81 @@ pub fn download(id: DownloadId) -> &'static DownloadPackage {
         .expect("every DownloadId must have a corresponding definition")
 }
 
-/// Default content root directory.
+/// Lookup an install recipe for a source/package combination.
+pub fn recipe(source: SourceId, package: PackageId) -> Option<&'static InstallRecipe> {
+    recipes::ALL_RECIPES
+        .iter()
+        .find(|r| r.source == source && r.package == package)
+}
+
+/// Returns all install recipes for a given source.
+pub fn recipes_for_source(source: SourceId) -> Vec<&'static InstallRecipe> {
+    recipes::ALL_RECIPES
+        .iter()
+        .filter(|r| r.source == source)
+        .collect()
+}
+
+/// Returns all packages that are not yet installed (both required and optional).
+pub fn missing_packages(content_root: &std::path::Path) -> Vec<&'static ContentPackage> {
+    packages::ALL_PACKAGES
+        .iter()
+        .filter(|p| !p.test_files.iter().all(|f| content_root.join(f).exists()))
+        .collect()
+}
+
+/// Default content root directory — portable, next to the executable.
 ///
-/// Returns `~/.iron-curtain/content/ra/v1/` expanded for the current platform.
+/// Resolution order:
+/// 1. `IC_CONTENT_DIR` env var (explicit override)
+/// 2. Executable-relative `content/ra/v1/` (portable default)
+///
+/// If the executable directory cannot be determined (e.g. sandboxed
+/// environment), falls back to `./content/ra/v1/` relative to CWD.
 pub fn default_content_root() -> std::path::PathBuf {
-    let base = dirs_content_root();
-    base.join("ra").join("v1")
+    if let Ok(dir) = std::env::var("IC_CONTENT_DIR") {
+        return std::path::PathBuf::from(dir);
+    }
+
+    app_path::try_app_path!("content/ra/v1")
+        .map(|p| p.into_path_buf())
+        .unwrap_or_else(|_| std::path::PathBuf::from("content/ra/v1"))
+}
+
+/// Returns the OpenRA content directory for the current platform.
+///
+/// Used by `--openra` to download content into OpenRA's managed path
+/// so both engines share the same files.
+///
+/// - Windows: `%APPDATA%/OpenRA/Content/ra/v2/`
+/// - Linux:   `~/.openra/Content/ra/v2/`
+/// - macOS:   `~/Library/Application Support/OpenRA/Content/ra/v2/`
+pub fn openra_content_root() -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            return Some(std::path::PathBuf::from(appdata).join("OpenRA/Content/ra/v2"));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            return Some(
+                std::path::PathBuf::from(home)
+                    .join("Library/Application Support/OpenRA/Content/ra/v2"),
+            );
+        }
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            return Some(std::path::PathBuf::from(home).join(".openra/Content/ra/v2"));
+        }
+    }
+
+    None
 }
 
 /// Returns all required packages that are not yet installed.
@@ -264,33 +345,6 @@ pub fn missing_required_packages(content_root: &std::path::Path) -> Vec<&'static
 /// Returns `true` if all required content is installed.
 pub fn is_content_complete(content_root: &std::path::Path) -> bool {
     missing_required_packages(content_root).is_empty()
-}
-
-/// Resolves the base content directory (`~/.iron-curtain/content/`).
-fn dirs_content_root() -> std::path::PathBuf {
-    // Check env var override first.
-    if let Ok(dir) = std::env::var("IC_CONTENT_DIR") {
-        return std::path::PathBuf::from(dir);
-    }
-
-    // Platform-specific home directory.
-    #[cfg(target_os = "windows")]
-    {
-        if let Ok(appdata) = std::env::var("LOCALAPPDATA") {
-            return std::path::PathBuf::from(appdata)
-                .join("iron-curtain")
-                .join("content");
-        }
-    }
-
-    if let Ok(home) = std::env::var("HOME") {
-        return std::path::PathBuf::from(home)
-            .join(".iron-curtain")
-            .join("content");
-    }
-
-    // Fallback.
-    std::path::PathBuf::from(".iron-curtain").join("content")
 }
 
 #[cfg(test)]

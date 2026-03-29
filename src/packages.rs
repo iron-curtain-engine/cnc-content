@@ -117,7 +117,7 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
             SourceId::SteamRemastered,
             SourceId::OriginRemastered,
         ],
-        download: None,
+        download: Some(DownloadId::Music),
     },
     ContentPackage {
         id: PackageId::MoviesAllied,
@@ -184,7 +184,7 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
             SourceId::SteamRemastered,
             SourceId::OriginRemastered,
         ],
-        download: None,
+        download: Some(DownloadId::MoviesAllied),
     },
     ContentPackage {
         id: PackageId::MoviesSoviet,
@@ -253,7 +253,7 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
             SourceId::SteamTuc,
             SourceId::OriginTuc,
         ],
-        download: None,
+        download: Some(DownloadId::MoviesSoviet),
     },
     ContentPackage {
         id: PackageId::MusicCounterstrike,
@@ -276,7 +276,7 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
             SourceId::SteamRemastered,
             SourceId::OriginRemastered,
         ],
-        download: None,
+        download: Some(DownloadId::MusicCounterstrike),
     },
     ContentPackage {
         id: PackageId::MusicAftermath,
@@ -300,6 +300,6 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
             SourceId::SteamRemastered,
             SourceId::OriginRemastered,
         ],
-        download: None,
+        download: Some(DownloadId::MusicAftermath),
     },
 ];

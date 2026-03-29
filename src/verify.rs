@@ -205,3 +205,267 @@ pub fn generate_manifest(
         files,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    // ── hex_encode ───────────────────────────────────────────────────
+
+    #[test]
+    fn hex_encode_empty() {
+        assert_eq!(hex_encode(&[]), "");
+    }
+
+    #[test]
+    fn hex_encode_known_values() {
+        assert_eq!(hex_encode(&[0x00]), "00");
+        assert_eq!(hex_encode(&[0xff]), "ff");
+        assert_eq!(hex_encode(&[0xde, 0xad, 0xbe, 0xef]), "deadbeef");
+        assert_eq!(
+            hex_encode(&[0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef]),
+            "0123456789abcdef"
+        );
+    }
+
+    #[test]
+    fn hex_encode_is_lowercase() {
+        let result = hex_encode(&[0xAB, 0xCD]);
+        assert_eq!(result, "abcd");
+        assert!(result.chars().all(|c| !c.is_ascii_uppercase()));
+    }
+
+    // ── sha1_file ────────────────────────────────────────────────────
+
+    #[test]
+    fn sha1_file_known_hash() {
+        let tmp = std::env::temp_dir().join("cnc-verify-sha1");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        // SHA-1 of empty string is da39a3ee5e6b4b0d3255bfef95601890afd80709
+        let path = tmp.join("empty.bin");
+        fs::write(&path, b"").unwrap();
+        let hash = sha1_file(&path, None).unwrap();
+        assert_eq!(hash, "da39a3ee5e6b4b0d3255bfef95601890afd80709");
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn sha1_file_prefix_length() {
+        let tmp = std::env::temp_dir().join("cnc-verify-sha1-prefix");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let path = tmp.join("data.bin");
+        fs::write(&path, b"HELLO WORLD EXTRA DATA").unwrap();
+
+        // Hash of "HELLO" (5 bytes) vs hash of entire file — should differ.
+        let hash_prefix = sha1_file(&path, Some(5)).unwrap();
+        let hash_full = sha1_file(&path, None).unwrap();
+        assert_ne!(hash_prefix, hash_full);
+
+        // Hash of prefix should be the same as hashing just "HELLO".
+        let path2 = tmp.join("hello.bin");
+        fs::write(&path2, b"HELLO").unwrap();
+        let hash_hello = sha1_file(&path2, None).unwrap();
+        assert_eq!(hash_prefix, hash_hello);
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn sha1_file_missing_returns_error() {
+        let result = sha1_file(std::path::Path::new("/nonexistent/file.bin"), None);
+        assert!(result.is_err());
+    }
+
+    // ── sha256_file ──────────────────────────────────────────────────
+
+    #[test]
+    fn sha256_file_known_hash() {
+        let tmp = std::env::temp_dir().join("cnc-verify-sha256");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        // SHA-256 of empty string is e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        let path = tmp.join("empty.bin");
+        fs::write(&path, b"").unwrap();
+        let hash = sha256_file(&path).unwrap();
+        assert_eq!(
+            hash,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(hash.len(), 64);
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn sha256_file_is_lowercase_hex() {
+        let tmp = std::env::temp_dir().join("cnc-verify-sha256-case");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let path = tmp.join("data.bin");
+        fs::write(&path, b"test data for hashing").unwrap();
+        let hash = sha256_file(&path).unwrap();
+        assert!(hash
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    // ── verify_id_file ───────────────────────────────────────────────
+
+    #[test]
+    fn verify_id_file_match() {
+        let tmp = std::env::temp_dir().join("cnc-verify-id-match");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let data = b"known content";
+        fs::write(tmp.join("test.mix"), data).unwrap();
+
+        // Compute the real SHA-1 of "known content".
+        let expected_sha1 = sha1_file(&tmp.join("test.mix"), None).unwrap();
+
+        let check = IdFileCheck {
+            path: "test.mix",
+            sha1: Box::leak(expected_sha1.into_boxed_str()),
+            prefix_length: None,
+        };
+
+        assert!(verify_id_file(&tmp, &check).unwrap());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn verify_id_file_mismatch() {
+        let tmp = std::env::temp_dir().join("cnc-verify-id-mismatch");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        fs::write(tmp.join("test.mix"), b"actual content").unwrap();
+
+        let check = IdFileCheck {
+            path: "test.mix",
+            sha1: "0000000000000000000000000000000000000000",
+            prefix_length: None,
+        };
+
+        assert!(!verify_id_file(&tmp, &check).unwrap());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn verify_id_file_missing_returns_false() {
+        let tmp = std::env::temp_dir().join("cnc-verify-id-missing");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let check = IdFileCheck {
+            path: "nonexistent.mix",
+            sha1: "0000000000000000000000000000000000000000",
+            prefix_length: None,
+        };
+
+        assert!(!verify_id_file(&tmp, &check).unwrap());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn verify_id_file_with_prefix() {
+        let tmp = std::env::temp_dir().join("cnc-verify-id-prefix");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        fs::write(tmp.join("main.mix"), b"HEADER_BYTES_REST_OF_FILE").unwrap();
+
+        // Get SHA-1 of first 12 bytes ("HEADER_BYTES").
+        let expected = sha1_file(&tmp.join("main.mix"), Some(12)).unwrap();
+
+        let check = IdFileCheck {
+            path: "main.mix",
+            sha1: Box::leak(expected.into_boxed_str()),
+            prefix_length: Some(12),
+        };
+
+        assert!(verify_id_file(&tmp, &check).unwrap());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    // ── verify_installed_content ─────────────────────────────────────
+
+    #[test]
+    fn verify_installed_content_detects_mismatch() {
+        let tmp = std::env::temp_dir().join("cnc-verify-installed");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        fs::write(tmp.join("good.mix"), b"correct data").unwrap();
+        fs::write(tmp.join("bad.mix"), b"wrong data").unwrap();
+
+        let good_hash = sha256_file(&tmp.join("good.mix")).unwrap();
+
+        let mut files = BTreeMap::new();
+        files.insert(
+            "good.mix".to_string(),
+            FileDigest {
+                sha256: good_hash,
+                size: 12,
+            },
+        );
+        files.insert(
+            "bad.mix".to_string(),
+            FileDigest {
+                sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
+                size: 10,
+            },
+        );
+        files.insert(
+            "missing.mix".to_string(),
+            FileDigest {
+                sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
+                size: 0,
+            },
+        );
+
+        let manifest = InstalledContentManifest {
+            version: 1,
+            game: "ra".to_string(),
+            content_version: "v1".to_string(),
+            files,
+        };
+
+        let failures = verify_installed_content(&tmp, &manifest);
+        assert_eq!(failures.len(), 2);
+        assert!(failures.contains(&"bad.mix".to_string()));
+        assert!(failures.contains(&"missing.mix".to_string()));
+        assert!(!failures.contains(&"good.mix".to_string()));
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    // ── identify_source ──────────────────────────────────────────────
+
+    #[test]
+    fn identify_source_returns_none_for_empty_dir() {
+        let tmp = std::env::temp_dir().join("cnc-verify-identify-empty");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        assert!(identify_source(&tmp).is_none());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+}
