@@ -10,7 +10,7 @@
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.85%2B-orange.svg" alt="Rust"></a>
 </p>
 
-Download, verify, and manage Red Alert 1 game content from any supported
+Download, verify, and manage Command & Conquer game content from any supported
 source. Works as a standalone CLI tool or as a library for engine integration.
 
 ## What it does
