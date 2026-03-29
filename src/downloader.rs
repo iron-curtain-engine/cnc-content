@@ -39,13 +39,21 @@ pub enum DownloadProgress {
     /// Fetching the mirror list.
     FetchingMirrors { url: String },
     /// Trying a mirror.
-    TryingMirror { index: usize, total: usize, url: String },
+    TryingMirror {
+        index: usize,
+        total: usize,
+        url: String,
+    },
     /// Download progress (bytes so far).
     Downloading { bytes: u64 },
     /// Download complete, verifying.
     Verifying,
     /// Extracting ZIP.
-    Extracting { entry: String, index: usize, total: usize },
+    Extracting {
+        entry: String,
+        index: usize,
+        total: usize,
+    },
     /// All done.
     Complete { files: usize },
 }

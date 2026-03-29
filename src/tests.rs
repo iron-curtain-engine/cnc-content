@@ -74,7 +74,11 @@ fn required_packages_are_base_aftermath_desert() {
         .collect();
     assert_eq!(
         required,
-        vec![PackageId::Base, PackageId::AftermathBase, PackageId::CncDesert]
+        vec![
+            PackageId::Base,
+            PackageId::AftermathBase,
+            PackageId::CncDesert
+        ]
     );
 }
 

@@ -254,9 +254,7 @@ pub fn default_content_root() -> std::path::PathBuf {
 }
 
 /// Returns all required packages that are not yet installed.
-pub fn missing_required_packages(
-    content_root: &std::path::Path,
-) -> Vec<&'static ContentPackage> {
+pub fn missing_required_packages(content_root: &std::path::Path) -> Vec<&'static ContentPackage> {
     packages::ALL_PACKAGES
         .iter()
         .filter(|p| p.required && !p.test_files.iter().all(|f| content_root.join(f).exists()))

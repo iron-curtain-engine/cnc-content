@@ -244,7 +244,7 @@ else
 fi
 
 # -- 9. MSRV check (rust-version from Cargo.toml) --------------------------
-MSRV=$(grep -oP 'rust-version\s*=\s*"\K[^"]+' Cargo.toml)
+MSRV=$(sed -n 's/^rust-version *= *"\([^"]*\)".*/\1/p' Cargo.toml)
 if [[ -z "$MSRV" ]]; then
     echo "WARNING: Could not determine rust-version from Cargo.toml. Skipping MSRV check."
     echo

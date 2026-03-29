@@ -5,7 +5,7 @@
 name = "cnc-content"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "C&C content acquisition — download, verify, and manage Red Alert game content"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/iron-curtain-engine/cnc-content"

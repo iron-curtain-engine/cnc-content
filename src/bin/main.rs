@@ -8,7 +8,7 @@ use std::process;
 
 use clap::{Parser, Subcommand};
 
-use cnc_content::downloader::{DownloadProgress, download_missing, download_package};
+use cnc_content::downloader::{download_missing, download_package, DownloadProgress};
 
 #[derive(Parser)]
 #[command(
@@ -63,10 +63,7 @@ fn cmd_status(content_root: &std::path::Path) {
     println!();
 
     for pkg in cnc_content::packages::ALL_PACKAGES {
-        let installed = pkg
-            .test_files
-            .iter()
-            .all(|f| content_root.join(f).exists());
+        let installed = pkg.test_files.iter().all(|f| content_root.join(f).exists());
         let marker = if installed { "✓" } else { "✗" };
         let req = if pkg.required { " (required)" } else { "" };
         println!("  {marker} {}{req}", pkg.title);
@@ -155,8 +152,7 @@ fn cmd_verify(content_root: &std::path::Path) {
     match cnc_content::verify::generate_manifest(content_root, "ra", "v1", &required_ids) {
         Ok(manifest) => {
             println!("Verifying {} files...", manifest.files.len());
-            let failures =
-                cnc_content::verify::verify_installed_content(content_root, &manifest);
+            let failures = cnc_content::verify::verify_installed_content(content_root, &manifest);
             if failures.is_empty() {
                 println!("All {} files verified successfully.", manifest.files.len());
             } else {
@@ -200,7 +196,10 @@ fn cmd_identify(path: &std::path::Path) {
         }
         None => {
             println!("No known RA1 content source identified at this path.");
-            println!("Checked against {} known sources.", cnc_content::sources::ALL_SOURCES.len());
+            println!(
+                "Checked against {} known sources.",
+                cnc_content::sources::ALL_SOURCES.len()
+            );
         }
     }
 }
@@ -221,7 +220,11 @@ fn print_progress(progress: DownloadProgress) {
         DownloadProgress::Verifying => {
             println!("Verifying SHA-1...");
         }
-        DownloadProgress::Extracting { entry, index, total } => {
+        DownloadProgress::Extracting {
+            entry,
+            index,
+            total,
+        } => {
             if index % 10 == 0 || index + 1 == total {
                 println!("  Extracting: {entry} ({}/{})", index + 1, total);
             }

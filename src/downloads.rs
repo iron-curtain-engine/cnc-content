@@ -23,7 +23,11 @@ pub static ALL_DOWNLOADS: &[DownloadPackage] = &[
         title: "Quick Install (Base + Aftermath + Desert)",
         mirror_list_url: "https://www.openra.net/packages/ra-quickinstall-mirrors.txt",
         sha1: "44241f68e69db9511db82cf83c174737ccda300b",
-        provides: &[PackageId::Base, PackageId::AftermathBase, PackageId::CncDesert],
+        provides: &[
+            PackageId::Base,
+            PackageId::AftermathBase,
+            PackageId::CncDesert,
+        ],
     },
     DownloadPackage {
         id: DownloadId::BaseFiles,

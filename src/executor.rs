@@ -25,10 +25,7 @@ pub enum InstallProgress {
         description: String,
     },
     /// A file was successfully written.
-    FileWritten {
-        path: PathBuf,
-        bytes: u64,
-    },
+    FileWritten { path: PathBuf, bytes: u64 },
     /// The entire recipe completed successfully.
     Completed {
         files_written: usize,
@@ -86,10 +83,7 @@ pub fn execute_recipe(
                     let dst = content_root.join(mapping.to);
                     ensure_parent(&dst)?;
                     let bytes = fs::copy(&src, &dst)?;
-                    on_progress(InstallProgress::FileWritten {
-                        path: dst,
-                        bytes,
-                    });
+                    on_progress(InstallProgress::FileWritten { path: dst, bytes });
                     files_written += 1;
                     total_bytes += bytes;
                 }
@@ -106,17 +100,15 @@ pub fn execute_recipe(
 
                 let file = fs::File::open(&mix_path)?;
                 let reader = io::BufReader::new(file);
-                let mut archive =
-                    cnc_formats::mix::MixArchiveReader::open(reader).map_err(|e| {
-                        io::Error::new(io::ErrorKind::InvalidData, e.to_string())
-                    })?;
+                let mut archive = cnc_formats::mix::MixArchiveReader::open(reader)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
 
                 for mapping in entries {
                     let entry_name = mapping.from;
 
-                    let data = archive.read(entry_name).map_err(|e| {
-                        io::Error::new(io::ErrorKind::InvalidData, e.to_string())
-                    })?;
+                    let data = archive
+                        .read(entry_name)
+                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
 
                     let data = data.ok_or_else(|| ExecutorError::MixEntryNotFound {
                         archive: source_mix.to_string(),
@@ -224,7 +216,9 @@ fn describe_action(action: &InstallAction) -> String {
                 source_mix
             )
         }
-        InstallAction::ExtractIscab { header, entries, .. } => {
+        InstallAction::ExtractIscab {
+            header, entries, ..
+        } => {
             format!(
                 "Extracting {} entry/entries from InstallShield {}",
                 entries.len(),

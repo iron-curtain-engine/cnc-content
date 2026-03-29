@@ -71,9 +71,10 @@ pub enum VerifyError {
 /// or `None` if no source matches.
 pub fn identify_source(source_root: &Path) -> Option<SourceId> {
     ALL_SOURCES.iter().find_map(|source| {
-        let all_match = source.id_files.iter().all(|check| {
-            verify_id_file(source_root, check).unwrap_or(false)
-        });
+        let all_match = source
+            .id_files
+            .iter()
+            .all(|check| verify_id_file(source_root, check).unwrap_or(false));
         if all_match {
             Some(source.id)
         } else {
@@ -192,10 +193,7 @@ pub fn generate_manifest(
             if full.exists() {
                 let sha256 = sha256_file(&full)?;
                 let size = fs::metadata(&full)?.len();
-                files.insert(
-                    test_file.to_string(),
-                    FileDigest { sha256, size },
-                );
+                files.insert(test_file.to_string(), FileDigest { sha256, size });
             }
         }
     }
