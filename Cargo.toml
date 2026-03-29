@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2025–present Iron Curtain contributors
+
+[package]
+name = "cnc-content"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "C&C content acquisition — download, verify, and manage Red Alert game content"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/iron-curtain-engine/cnc-content"
+authors = ["Iron Curtain contributors"]
+keywords = ["red-alert", "command-conquer", "content", "gamedev"]
+categories = ["games", "command-line-utilities"]
+
+[[bin]]
+name = "cnc-content"
+path = "src/bin/main.rs"
+required-features = ["cli"]
+
+[dependencies]
+cnc-formats = { path = "../cnc-formats", default-features = false, features = [
+    "encrypted-mix",
+] }
+serde = { version = "1", features = ["derive"] }
+sha1 = "0.11"
+sha2 = "0.11"
+thiserror = "2.0"
+
+# CLI-only deps
+clap = { version = "4", features = ["derive", "env"], optional = true }
+
+# Download deps (also used by test provisioner)
+ureq = { version = "3", optional = true }
+zip = { version = "8", default-features = false, features = ["deflate"], optional = true }
+
+[features]
+default = ["cli", "download"]
+cli = ["dep:clap", "download"]
+download = ["dep:ureq", "dep:zip"]
+
+[dev-dependencies]
