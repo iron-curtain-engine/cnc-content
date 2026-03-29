@@ -62,11 +62,11 @@ fn cmd_status(content_root: &std::path::Path) {
     println!("Content directory: {}", content_root.display());
     println!();
 
-    for pkg in cnc_content::packages::ALL_PACKAGES {
+    println!("  Required:");
+    for pkg in cnc_content::packages::ALL_PACKAGES.iter().filter(|p| p.required) {
         let installed = pkg.test_files.iter().all(|f| content_root.join(f).exists());
         let marker = if installed { "✓" } else { "✗" };
-        let req = if pkg.required { " (required)" } else { "" };
-        println!("  {marker} {}{req}", pkg.title);
+        println!("    {marker} {}", pkg.title);
 
         if !installed {
             let missing: Vec<_> = pkg
@@ -76,12 +76,20 @@ fn cmd_status(content_root: &std::path::Path) {
                 .collect();
             if missing.len() <= 3 {
                 for f in &missing {
-                    println!("      missing: {f}");
+                    println!("        missing: {f}");
                 }
             } else {
-                println!("      missing: {} files", missing.len());
+                println!("        missing: {} files", missing.len());
             }
         }
+    }
+
+    println!();
+    println!("  Optional (requires disc, Steam, Origin, or Remastered):");
+    for pkg in cnc_content::packages::ALL_PACKAGES.iter().filter(|p| !p.required) {
+        let installed = pkg.test_files.iter().all(|f| content_root.join(f).exists());
+        let marker = if installed { "✓" } else { "–" };
+        println!("    {marker} {}", pkg.title);
     }
 
     println!();
@@ -213,9 +221,7 @@ fn print_progress(progress: DownloadProgress) {
             println!("  Mirror {}/{total}: {url}", index + 1);
         }
         DownloadProgress::Downloading { bytes } => {
-            if bytes % (1024 * 1024) < 65536 {
-                println!("  Downloaded: {:.1} MB", bytes as f64 / 1_048_576.0);
-            }
+            println!("  Downloaded: {:.1} MB", bytes as f64 / 1_048_576.0);
         }
         DownloadProgress::Verifying => {
             println!("Verifying SHA-1...");

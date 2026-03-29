@@ -176,6 +176,8 @@ fn try_download(
     let mut file = fs::File::create(dest)?;
     let mut buf = [0u8; 65536];
     let mut total: u64 = 0;
+    // Track which MB we last reported to avoid spamming the callback.
+    let mut last_reported_mb: u64 = 0;
 
     loop {
         let n = body.read(&mut buf)?;
@@ -184,9 +186,15 @@ fn try_download(
         }
         file.write_all(&buf[..n])?;
         total += n as u64;
-        on_bytes(total);
+        let current_mb = total / (1024 * 1024);
+        if current_mb > last_reported_mb {
+            last_reported_mb = current_mb;
+            on_bytes(total);
+        }
     }
 
+    // Final report so callers see the total.
+    on_bytes(total);
     file.flush()?;
     Ok(total)
 }
