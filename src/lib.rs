@@ -3,14 +3,15 @@
 
 //! # cnc-content — C&C content acquisition
 //!
-//! Standalone crate for downloading, verifying, and managing Red Alert 1 game
-//! content. Works without Bevy or any game engine dependency.
+//! Standalone crate for downloading, verifying, and managing Command & Conquer
+//! game content. Supports Red Alert, Tiberian Dawn, and Dune 2.
+//! Works without Bevy or any game engine dependency.
 //!
 //! ## What it does
 //!
-//! - **Defines** what RA1 content the game needs (packages, sources, downloads)
+//! - **Defines** what each game needs (packages, sources, downloads)
 //! - **Identifies** content sources on disk (discs, Steam, GOG, Origin installs)
-//! - **Downloads** content from OpenRA mirrors or IC P2P network
+//! - **Downloads** content via HTTP mirrors or BitTorrent P2P
 //! - **Extracts** content from MIX archives, InstallShield CABs, ZIPs, raw offsets
 //! - **Verifies** source identity (SHA-1) and installed integrity (SHA-256)
 //!
@@ -19,21 +20,23 @@
 //! Build with the `cli` feature (default) for the `cnc-content` command:
 //!
 //! ```sh
-//! cnc-content status              # show installed/missing packages
-//! cnc-content download            # download all required content
-//! cnc-content verify              # check installed content integrity
-//! cnc-content identify <path>     # identify a content source
+//! cnc-content status                    # show installed/missing packages
+//! cnc-content download                  # download all required content
+//! cnc-content download --game td        # download Tiberian Dawn
+//! cnc-content install --game dune2 /mnt/cdrom  # install from local source
+//! cnc-content verify                    # check installed content integrity
+//! cnc-content identify <path>           # identify a content source
 //! ```
 //!
 //! ## Library usage
 //!
 //! ```rust,no_run
-//! use cnc_content::{packages, sources, downloads, verify};
+//! use cnc_content::{GameId, packages, sources, downloads, verify};
 //!
-//! // Check if content is complete
+//! // Check if Red Alert content is complete
 //! let root = std::path::Path::new("~/.iron-curtain/content/ra/v1");
-//! if !cnc_content::is_content_complete(root) {
-//!     let missing = cnc_content::missing_required_packages(root);
+//! if !cnc_content::is_content_complete(root, GameId::RedAlert) {
+//!     let missing = cnc_content::missing_required_packages(root, GameId::RedAlert);
 //!     for pkg in missing {
 //!         eprintln!("missing: {}", pkg.title);
 //!     }
@@ -41,44 +44,135 @@
 //! ```
 
 pub mod actions;
+pub mod config;
 #[cfg(feature = "download")]
 pub mod downloader;
 pub mod downloads;
 pub mod executor;
+pub mod iscab;
 pub mod packages;
 pub mod recipes;
+#[cfg(feature = "download")]
+pub mod session;
 pub mod source;
 pub mod sources;
+pub mod streaming;
+#[cfg(feature = "torrent")]
+pub mod torrent;
+pub mod torrent_create;
 pub mod verify;
 
 use serde::{Deserialize, Serialize};
 
 // ── Core type definitions ──────────────────────────────────────────────
 
+/// Identifies a supported game.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GameId {
+    /// Command & Conquer: Red Alert (1996) + expansions.
+    RedAlert,
+    /// Command & Conquer: Tiberian Dawn (1995) + Covert Operations.
+    TiberianDawn,
+    /// Dune II: The Building of a Dynasty (1992).
+    /// NOT freeware — local source extraction only, no downloads.
+    Dune2,
+    /// Dune 2000 (1998).
+    /// NOT freeware — local source extraction only, no downloads.
+    Dune2000,
+}
+
+impl GameId {
+    /// Short CLI-friendly identifier.
+    pub fn slug(self) -> &'static str {
+        match self {
+            GameId::RedAlert => "ra",
+            GameId::TiberianDawn => "td",
+            GameId::Dune2 => "dune2",
+            GameId::Dune2000 => "dune2000",
+        }
+    }
+
+    /// Human-readable title.
+    pub fn title(self) -> &'static str {
+        match self {
+            GameId::RedAlert => "Command & Conquer: Red Alert",
+            GameId::TiberianDawn => "Command & Conquer: Tiberian Dawn",
+            GameId::Dune2 => "Dune II: The Building of a Dynasty",
+            GameId::Dune2000 => "Dune 2000",
+        }
+    }
+
+    /// Whether this game's content is EA-declared freeware and can be downloaded.
+    pub fn is_freeware(self) -> bool {
+        matches!(self, GameId::RedAlert | GameId::TiberianDawn)
+    }
+
+    /// Parse from a CLI slug string.
+    pub fn from_slug(s: &str) -> Option<GameId> {
+        match s.to_lowercase().as_str() {
+            "ra" | "redalert" | "red-alert" => Some(GameId::RedAlert),
+            "td" | "tiberiandawn" | "tiberian-dawn" | "cnc" | "cnc95" => Some(GameId::TiberianDawn),
+            "dune2" | "duneii" | "dune-2" => Some(GameId::Dune2),
+            "dune2000" | "dune-2000" | "d2k" => Some(GameId::Dune2000),
+            _ => None,
+        }
+    }
+
+    /// All supported games.
+    pub const ALL: &[GameId] = &[
+        GameId::RedAlert,
+        GameId::TiberianDawn,
+        GameId::Dune2,
+        GameId::Dune2000,
+    ];
+}
+
 /// Identifies a content package — a logical group of files the game needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PackageId {
+    // ── Red Alert ─────────────────────────────────────────────────────
     /// Core RA1 data: allies.mix, conquer.mix, interior.mix, etc.
-    Base,
+    RaBase,
     /// Aftermath expansion base files: expand2.mix, hires1.mix, loose AUDs.
-    AftermathBase,
+    RaAftermathBase,
     /// C&C desert tileset borrowed for some RA1 maps.
-    CncDesert,
+    RaCncDesert,
     /// Red Alert score music (scores.mix).
-    Music,
+    RaMusic,
     /// Allied campaign FMV cutscenes.
-    MoviesAllied,
+    RaMoviesAllied,
     /// Soviet campaign FMV cutscenes.
-    MoviesSoviet,
+    RaMoviesSoviet,
     /// Counterstrike expansion music tracks.
-    MusicCounterstrike,
+    RaMusicCounterstrike,
     /// Aftermath expansion music tracks.
-    MusicAftermath,
+    RaMusicAftermath,
+
+    // ── Tiberian Dawn ─────────────────────────────────────────────────
+    /// Core TD data: conquer.mix, desert.mix, temperat.mix, etc.
+    TdBase,
+    /// Covert Operations expansion data.
+    TdCovertOps,
+    /// Tiberian Dawn score music (scores.mix).
+    TdMusic,
+    /// GDI campaign FMV cutscenes.
+    TdMoviesGdi,
+    /// Nod campaign FMV cutscenes.
+    TdMoviesNod,
+
+    // ── Dune 2 (local source only) ──────────────────────────────────
+    /// Complete Dune 2 game data. NOT freeware — local extraction only.
+    Dune2Base,
+
+    // ── Dune 2000 (local source only) ────────────────────────────────
+    /// Complete Dune 2000 game data. NOT freeware — local extraction only.
+    Dune2000Base,
 }
 
 /// Identifies a content source — a place content can be obtained from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SourceId {
+    // ── Red Alert sources ─────────────────────────────────────────────
     /// Allied Disc (western retail CD).
     AlliedDisc,
     /// Soviet Disc (eastern retail CD).
@@ -103,29 +197,145 @@ pub enum SourceId {
     OriginCnc,
     /// Origin / EA App — C&C Remastered Collection.
     OriginRemastered,
+
+    // ── Tiberian Dawn sources ─────────────────────────────────────────
+    /// C&C95 GDI disc image.
+    TdGdiDisc,
+    /// C&C95 Nod disc image.
+    TdNodDisc,
+    /// Covert Operations disc image.
+    TdCovertOpsDisc,
+    /// Steam — C&C (Tiberian Dawn).
+    TdSteamCnc,
+    /// Steam — C&C Remastered Collection (TD data).
+    TdSteamRemastered,
+    /// Origin — C&C (Tiberian Dawn).
+    TdOriginCnc,
+
+    // ── Dune 2 sources (local only) ─────────────────────────────────
+    /// Dune 2 floppy/CD release. NOT freeware — local extraction only.
+    Dune2Disc,
+    /// Dune 2 GOG.com install. NOT freeware — local extraction only.
+    GogDune2,
+
+    // ── Dune 2000 sources (local only) ───────────────────────────────
+    /// Dune 2000 disc or digital install. NOT freeware — local extraction only.
+    Dune2000Disc,
+    /// Dune 2000 GOG.com install. NOT freeware — local extraction only.
+    GogDune2000,
 }
 
-/// Identifies an HTTP download package.
+/// Identifies an HTTP/torrent download package.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DownloadId {
+    // ── Red Alert downloads ───────────────────────────────────────────
     /// Quick-install base files (OpenRA freeware mirrors).
-    QuickInstall,
+    RaQuickInstall,
     /// Base content files.
-    BaseFiles,
+    RaBaseFiles,
     /// Aftermath expansion content.
-    Aftermath,
+    RaAftermath,
     /// C&C desert tileset.
-    CncDesert,
+    RaCncDesert,
     /// Red Alert score music (scores.mix) — IC-hosted freeware.
-    Music,
+    RaMusic,
     /// Allied campaign movies (.vqa) — IC-hosted freeware.
-    MoviesAllied,
+    RaMoviesAllied,
     /// Soviet campaign movies (.vqa) — IC-hosted freeware.
-    MoviesSoviet,
+    RaMoviesSoviet,
     /// Counterstrike expansion music — IC-hosted freeware.
-    MusicCounterstrike,
+    RaMusicCounterstrike,
     /// Aftermath expansion music — IC-hosted freeware.
-    MusicAftermath,
+    RaMusicAftermath,
+    /// Full Allied + Soviet disc ISOs (Archive.org freeware mirror).
+    RaFullDiscs,
+    /// Full 4-CD set: Allied + Soviet + Counterstrike + Aftermath (Archive.org).
+    RaFullSet,
+
+    // ── Tiberian Dawn downloads ───────────────────────────────────────
+    /// TD base game via OpenRA mirrors (freeware since 2007).
+    TdBaseFiles,
+    /// TD music (scores.mix).
+    TdMusic,
+    /// GDI campaign movies — CNCNZ/Archive.org freeware mirrors.
+    TdMoviesGdi,
+    /// Nod campaign movies — CNCNZ/Archive.org freeware mirrors.
+    TdMoviesNod,
+    /// Covert Operations expansion — CNCNZ freeware ISO.
+    TdCovertOps,
+    /// Full GDI disc ISO (CNCNZ freeware mirror).
+    TdGdiIso,
+    /// Full Nod disc ISO (CNCNZ freeware mirror).
+    TdNodIso,
+    // NOTE: No Dune 2 or Dune 2000 downloads — they are NOT freeware.
+    // Only EA-declared freeware (RA, TD) may be downloaded.
+}
+
+/// Controls how the client shares downloaded content with other peers.
+///
+/// BitTorrent is a two-way protocol: downloading a file also means uploading
+/// pieces to other peers (seeding). This policy lets the user control that
+/// upload behavior. The default is `PauseDuringOnlinePlay`, which seeds
+/// content when idle but pauses uploads during online gameplay to preserve
+/// bandwidth.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SeedingPolicy {
+    /// Seed downloaded content, but pause during online gameplay (default).
+    ///
+    /// This is the recommended setting: the user contributes to the P2P
+    /// swarm when their bandwidth is idle, but seeding is temporarily
+    /// suspended when a network game session is active.
+    #[default]
+    PauseDuringOnlinePlay,
+    /// Seed continuously, even during online play.
+    ///
+    /// For users with high bandwidth who want to maximize their
+    /// contribution to the swarm.
+    SeedAlways,
+    /// Keep downloaded archives but never upload to other peers.
+    ///
+    /// Downloaded ZIPs/ISOs are retained on disk (enabling fast
+    /// re-extraction if content is corrupted) but no data is shared.
+    KeepNoSeed,
+    /// Extract content, then delete downloaded archives. No seeding.
+    ///
+    /// Minimizes disk usage. Downloaded packages are deleted immediately
+    /// after successful extraction and verification. Re-downloading is
+    /// required if content needs to be repaired.
+    ExtractAndDelete,
+}
+
+impl SeedingPolicy {
+    /// Whether this policy allows uploading to other peers at all.
+    pub fn allows_seeding(self) -> bool {
+        matches!(self, Self::PauseDuringOnlinePlay | Self::SeedAlways)
+    }
+
+    /// Whether downloaded archives should be retained on disk.
+    pub fn retains_archives(self) -> bool {
+        !matches!(self, Self::ExtractAndDelete)
+    }
+
+    /// Parse from a user-facing string (CLI, config file).
+    pub fn from_str_loose(s: &str) -> Option<Self> {
+        match s.to_lowercase().replace('-', "_").as_str() {
+            "pause" | "pause_during_online_play" | "default" => Some(Self::PauseDuringOnlinePlay),
+            "always" | "seed_always" => Some(Self::SeedAlways),
+            "keep" | "keep_no_seed" | "no_seed" => Some(Self::KeepNoSeed),
+            "delete" | "extract_and_delete" | "extract_delete" => Some(Self::ExtractAndDelete),
+            _ => None,
+        }
+    }
+
+    /// Human-readable label for UI display.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::PauseDuringOnlinePlay => "Seed (pause during online play)",
+            Self::SeedAlways => "Seed always",
+            Self::KeepNoSeed => "Keep archives, no seeding",
+            Self::ExtractAndDelete => "Extract & delete (no seeding)",
+        }
+    }
 }
 
 /// Type of content source for platform-specific probe routing.
@@ -165,11 +375,13 @@ pub struct IdFileCheck {
 pub struct ContentPackage {
     /// Stable identifier.
     pub id: PackageId,
+    /// Which game this package belongs to.
+    pub game: GameId,
     /// Human-readable title for UI display.
     pub title: &'static str,
     /// Whether the game refuses to start without this package.
     pub required: bool,
-    /// Files whose presence proves this package is installed.
+    /// Files that prove this package is installed (checked at content root).
     pub test_files: &'static [&'static str],
     /// Sources that can provide this package.
     pub sources: &'static [SourceId],
@@ -202,6 +414,8 @@ pub enum PlatformHint {
         key: &'static str,
         value: &'static str,
     },
+    /// GOG.com game ID for Galaxy library and registry detection.
+    GogGameId(u64),
 }
 
 /// An install recipe — a named sequence of actions that extracts a specific
@@ -216,19 +430,42 @@ pub struct InstallRecipe {
     pub actions: &'static [actions::InstallAction],
 }
 
-/// An HTTP download package definition.
+/// An HTTP/torrent download package definition.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DownloadPackage {
     /// Stable identifier.
     pub id: DownloadId,
+    /// Which game this download belongs to.
+    pub game: GameId,
     /// Human-readable title for UI display.
     pub title: &'static str,
     /// URL that returns a newline-separated list of mirror URLs.
+    /// Empty string if this download uses direct URLs only.
     pub mirror_list_url: &'static str,
-    /// Expected SHA-1 of the downloaded archive.
+    /// Direct download URLs (tried in order). Used when no mirror list exists.
+    pub direct_urls: &'static [&'static str],
+    /// Expected SHA-1 of the downloaded archive (40 hex chars, or all-zero placeholder).
     pub sha1: &'static str,
+    /// BitTorrent info hash (hex) for P2P download. Empty if no torrent available.
+    pub info_hash: &'static str,
+    /// Well-known tracker URLs for BitTorrent downloads.
+    pub trackers: &'static [&'static str],
     /// Which packages installing this download provides.
     pub provides: &'static [PackageId],
+    /// Format hint for extraction: "zip", "iso", "raw", etc.
+    pub format: &'static str,
+    /// Approximate download size in bytes (for progress display, 0 if unknown).
+    pub size_hint: u64,
+}
+
+impl DownloadPackage {
+    /// Returns `true` if this download has at least one reachable source
+    /// (mirror list URL, direct URL, or torrent info hash).
+    pub fn is_available(&self) -> bool {
+        !self.mirror_list_url.is_empty()
+            || !self.direct_urls.is_empty()
+            || !self.info_hash.is_empty()
+    }
 }
 
 // ── Convenience functions ──────────────────────────────────────────────
@@ -272,30 +509,57 @@ pub fn recipes_for_source(source: SourceId) -> Vec<&'static InstallRecipe> {
         .collect()
 }
 
-/// Returns all packages that are not yet installed (both required and optional).
-pub fn missing_packages(content_root: &std::path::Path) -> Vec<&'static ContentPackage> {
+/// Returns all packages for a specific game.
+pub fn packages_for_game(game: GameId) -> Vec<&'static ContentPackage> {
     packages::ALL_PACKAGES
         .iter()
-        .filter(|p| !p.test_files.iter().all(|f| content_root.join(f).exists()))
+        .filter(|p| p.game == game)
         .collect()
 }
 
-/// Default content root directory — portable, next to the executable.
+/// Returns all downloads for a specific game.
+pub fn downloads_for_game(game: GameId) -> Vec<&'static DownloadPackage> {
+    downloads::ALL_DOWNLOADS
+        .iter()
+        .filter(|d| d.game == game)
+        .collect()
+}
+
+/// Returns all packages that are not yet installed (both required and optional).
+pub fn missing_packages(
+    content_root: &std::path::Path,
+    game: GameId,
+) -> Vec<&'static ContentPackage> {
+    packages::ALL_PACKAGES
+        .iter()
+        .filter(|p| p.game == game && !p.test_files.iter().all(|f| content_root.join(f).exists()))
+        .collect()
+}
+
+/// Default content root directory for a given game.
 ///
 /// Resolution order:
-/// 1. `IC_CONTENT_DIR` env var (explicit override)
-/// 2. Executable-relative `content/ra/v1/` (portable default)
+/// 1. `CNC_CONTENT_ROOT` env var (explicit override — used as-is)
+/// 2. Executable-relative `content/<slug>/v1/` (portable default)
 ///
 /// If the executable directory cannot be determined (e.g. sandboxed
-/// environment), falls back to `./content/ra/v1/` relative to CWD.
-pub fn default_content_root() -> std::path::PathBuf {
-    if let Ok(dir) = std::env::var("IC_CONTENT_DIR") {
+/// environment), falls back to `./content/<slug>/v1/` relative to CWD.
+pub fn default_content_root_for_game(game: GameId) -> std::path::PathBuf {
+    if let Ok(dir) = std::env::var("CNC_CONTENT_ROOT") {
         return std::path::PathBuf::from(dir);
     }
 
-    app_path::try_app_path!("content/ra/v1")
-        .map(|p| p.into_path_buf())
-        .unwrap_or_else(|_| std::path::PathBuf::from("content/ra/v1"))
+    let suffix = format!("content/{}/v1", game.slug());
+    // app_path macro only takes literals, so we compute the exe dir manually.
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|p| p.join(&suffix)))
+        .unwrap_or_else(|| std::path::PathBuf::from(&suffix))
+}
+
+/// Default content root for Red Alert (backwards-compatible).
+pub fn default_content_root() -> std::path::PathBuf {
+    default_content_root_for_game(GameId::RedAlert)
 }
 
 /// Returns the OpenRA content directory for the current platform.
@@ -334,17 +598,42 @@ pub fn openra_content_root() -> Option<std::path::PathBuf> {
     None
 }
 
-/// Returns all required packages that are not yet installed.
-pub fn missing_required_packages(content_root: &std::path::Path) -> Vec<&'static ContentPackage> {
+/// Returns all required packages for a game that are not yet installed.
+pub fn missing_required_packages(
+    content_root: &std::path::Path,
+    game: GameId,
+) -> Vec<&'static ContentPackage> {
     packages::ALL_PACKAGES
         .iter()
-        .filter(|p| p.required && !p.test_files.iter().all(|f| content_root.join(f).exists()))
+        .filter(|p| {
+            p.game == game
+                && p.required
+                && !p.test_files.iter().all(|f| content_root.join(f).exists())
+        })
         .collect()
 }
 
-/// Returns `true` if all required content is installed.
-pub fn is_content_complete(content_root: &std::path::Path) -> bool {
-    missing_required_packages(content_root).is_empty()
+/// Returns `true` if all required content for a game is installed.
+pub fn is_content_complete(content_root: &std::path::Path, game: GameId) -> bool {
+    missing_required_packages(content_root, game).is_empty()
+}
+
+/// Well-known public BitTorrent tracker announce URLs, embedded from
+/// `data/trackers.txt`. Public trackers are neutral infrastructure — they
+/// coordinate peer discovery but do not host content. Legality depends
+/// entirely on what content is shared (we only share EA freeware).
+///
+/// These trackers are NOT yet active for our content. Torrents must first
+/// be created, seeded, and registered with the tracker before P2P works.
+/// Until then, all downloads use HTTP mirrors.
+pub const PUBLIC_TRACKERS_RAW: &str = include_str!("../data/trackers.txt");
+
+/// Parsed tracker URLs from `data/trackers.txt`.
+pub fn public_trackers() -> impl Iterator<Item = &'static str> {
+    PUBLIC_TRACKERS_RAW
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
 }
 
 #[cfg(test)]

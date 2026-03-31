@@ -1,22 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025–present Iron Curtain contributors
 
-//! RA1 content package definitions — what the game needs to run.
+//! Content package definitions — what each game needs to run.
 //!
-//! Each entry mirrors an OpenRA `ContentPackage` from `mods/ra-content/mod.yaml`
-//! but expressed as Rust const data for compile-time validation.
-//! File lists and source mappings match OpenRA exactly.
+//! Packages are grouped by game. Test file lists are immutable properties of
+//! games released in the 1990s — they belong inline as Rust slices, not in
+//! external files.
 
-use crate::{ContentPackage, DownloadId, PackageId, SourceId};
+use crate::{ContentPackage, DownloadId, GameId, PackageId, SourceId};
 
-/// All RA1 content packages.
-///
-/// The first three (`Base`, `AftermathBase`, `CncDesert`) are required for
-/// the game to launch. The rest are optional enhancements (music, movies).
+/// All content packages across all supported games.
 pub static ALL_PACKAGES: &[ContentPackage] = &[
-    // ── Required packages ──────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════
+    // Red Alert — freeware since 31 August 2008 (EA release)
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── Required packages ─────────────────────────────────────────────
     ContentPackage {
-        id: PackageId::Base,
+        id: PackageId::RaBase,
+        game: GameId::RedAlert,
         title: "Base Game Content",
         required: true,
         test_files: &[
@@ -41,17 +43,17 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
             SourceId::SteamRemastered,
             SourceId::OriginRemastered,
         ],
-        download: Some(DownloadId::BaseFiles),
+        download: Some(DownloadId::RaBaseFiles),
     },
     ContentPackage {
-        id: PackageId::AftermathBase,
+        id: PackageId::RaAftermathBase,
+        game: GameId::RedAlert,
         title: "Aftermath Expansion",
         required: true,
         test_files: &[
             "expand/expand2.mix",
             "expand/hires1.mix",
             "expand/lores1.mix",
-            // Loose Aftermath AUD files — exact names from OpenRA's mod.yaml.
             "expand/chrotnk1.aud",
             "expand/fixit1.aud",
             "expand/jburn1.aud",
@@ -85,10 +87,11 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
             SourceId::SteamRemastered,
             SourceId::OriginRemastered,
         ],
-        download: Some(DownloadId::Aftermath),
+        download: Some(DownloadId::RaAftermath),
     },
     ContentPackage {
-        id: PackageId::CncDesert,
+        id: PackageId::RaCncDesert,
+        game: GameId::RedAlert,
         title: "C&C Desert Tileset",
         required: true,
         test_files: &["cnc/desert.mix"],
@@ -100,11 +103,12 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
             SourceId::SteamRemastered,
             SourceId::OriginRemastered,
         ],
-        download: Some(DownloadId::CncDesert),
+        download: Some(DownloadId::RaCncDesert),
     },
-    // ── Optional packages ──────────────────────────────────────────────
+    // ── Optional packages ─────────────────────────────────────────────
     ContentPackage {
-        id: PackageId::Music,
+        id: PackageId::RaMusic,
+        game: GameId::RedAlert,
         title: "Red Alert Music",
         required: false,
         test_files: &["scores.mix"],
@@ -117,10 +121,11 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
             SourceId::SteamRemastered,
             SourceId::OriginRemastered,
         ],
-        download: Some(DownloadId::Music),
+        download: Some(DownloadId::RaMusic),
     },
     ContentPackage {
-        id: PackageId::MoviesAllied,
+        id: PackageId::RaMoviesAllied,
+        game: GameId::RedAlert,
         title: "Allied Campaign Movies",
         required: false,
         test_files: &[
@@ -184,10 +189,11 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
             SourceId::SteamRemastered,
             SourceId::OriginRemastered,
         ],
-        download: Some(DownloadId::MoviesAllied),
+        download: Some(DownloadId::RaMoviesAllied),
     },
     ContentPackage {
-        id: PackageId::MoviesSoviet,
+        id: PackageId::RaMoviesSoviet,
+        game: GameId::RedAlert,
         title: "Soviet Campaign Movies",
         required: false,
         test_files: &[
@@ -253,10 +259,11 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
             SourceId::SteamTuc,
             SourceId::OriginTuc,
         ],
-        download: Some(DownloadId::MoviesSoviet),
+        download: Some(DownloadId::RaMoviesSoviet),
     },
     ContentPackage {
-        id: PackageId::MusicCounterstrike,
+        id: PackageId::RaMusicCounterstrike,
+        game: GameId::RedAlert,
         title: "Counterstrike Music",
         required: false,
         test_files: &[
@@ -276,10 +283,11 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
             SourceId::SteamRemastered,
             SourceId::OriginRemastered,
         ],
-        download: Some(DownloadId::MusicCounterstrike),
+        download: Some(DownloadId::RaMusicCounterstrike),
     },
     ContentPackage {
-        id: PackageId::MusicAftermath,
+        id: PackageId::RaMusicAftermath,
+        game: GameId::RedAlert,
         title: "Aftermath Music",
         required: false,
         test_files: &[
@@ -300,6 +308,144 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
             SourceId::SteamRemastered,
             SourceId::OriginRemastered,
         ],
-        download: Some(DownloadId::MusicAftermath),
+        download: Some(DownloadId::RaMusicAftermath),
+    },
+    // ══════════════════════════════════════════════════════════════════════
+    // Tiberian Dawn — freeware since 31 August 2007 (EA release)
+    // ══════════════════════════════════════════════════════════════════════
+    ContentPackage {
+        id: PackageId::TdBase,
+        game: GameId::TiberianDawn,
+        title: "Tiberian Dawn Base Game",
+        required: true,
+        test_files: &[
+            "conquer.mix",
+            "desert.mix",
+            "general.mix",
+            "scores.mix",
+            "sounds.mix",
+            "speech.mix",
+            "temperat.mix",
+            "transit.mix",
+            "winter.mix",
+        ],
+        sources: &[
+            SourceId::TdGdiDisc,
+            SourceId::TdNodDisc,
+            SourceId::TdSteamCnc,
+            SourceId::TdSteamRemastered,
+            SourceId::TdOriginCnc,
+        ],
+        download: Some(DownloadId::TdBaseFiles),
+    },
+    ContentPackage {
+        id: PackageId::TdCovertOps,
+        game: GameId::TiberianDawn,
+        title: "Covert Operations Expansion",
+        required: false,
+        test_files: &["sc-000.mix", "sc-001.mix"],
+        sources: &[
+            SourceId::TdCovertOpsDisc,
+            SourceId::TdSteamCnc,
+            SourceId::TdOriginCnc,
+        ],
+        download: Some(DownloadId::TdCovertOps),
+    },
+    ContentPackage {
+        id: PackageId::TdMusic,
+        game: GameId::TiberianDawn,
+        title: "Tiberian Dawn Music",
+        required: false,
+        test_files: &["scores.mix"],
+        sources: &[
+            SourceId::TdGdiDisc,
+            SourceId::TdNodDisc,
+            SourceId::TdSteamCnc,
+            SourceId::TdOriginCnc,
+        ],
+        download: Some(DownloadId::TdMusic),
+    },
+    ContentPackage {
+        id: PackageId::TdMoviesGdi,
+        game: GameId::TiberianDawn,
+        title: "GDI Campaign Movies",
+        required: false,
+        test_files: &[
+            "movies/gdi1.vqa",
+            "movies/gdi2.vqa",
+            "movies/gdi3.vqa",
+            "movies/gdi15.vqa",
+            "movies/logo.vqa",
+        ],
+        sources: &[
+            SourceId::TdGdiDisc,
+            SourceId::TdSteamCnc,
+            SourceId::TdOriginCnc,
+        ],
+        download: Some(DownloadId::TdMoviesGdi),
+    },
+    ContentPackage {
+        id: PackageId::TdMoviesNod,
+        game: GameId::TiberianDawn,
+        title: "Nod Campaign Movies",
+        required: false,
+        test_files: &[
+            "movies/nod1.vqa",
+            "movies/nod2.vqa",
+            "movies/nod3.vqa",
+            "movies/nod10.vqa",
+            "movies/logo.vqa",
+        ],
+        sources: &[
+            SourceId::TdNodDisc,
+            SourceId::TdSteamCnc,
+            SourceId::TdOriginCnc,
+        ],
+        download: Some(DownloadId::TdMoviesNod),
+    },
+    // ══════════════════════════════════════════════════════════════════════
+    // Dune 2 — LOCAL SOURCE ONLY (NOT freeware, no downloads)
+    //
+    // Dune 2 was NEVER officially released as freeware by EA. The Dune IP
+    // belongs to the Herbert estate. We support extraction from local copies
+    // the user already owns, but we do NOT download this game.
+    // ══════════════════════════════════════════════════════════════════════
+    ContentPackage {
+        id: PackageId::Dune2Base,
+        game: GameId::Dune2,
+        title: "Dune II Complete Game (local source only)",
+        required: true,
+        test_files: &[
+            "DUNE2.EXE",
+            "SCENARIO.PAK",
+            "SOUND.PAK",
+            "DUNE.PAK",
+            "ATRE.PAK",
+            "HARK.PAK",
+            "ORDOS.PAK",
+        ],
+        sources: &[SourceId::Dune2Disc, SourceId::GogDune2],
+        download: None, // NOT freeware — no download
+    },
+    // ══════════════════════════════════════════════════════════════════════
+    // Dune 2000 — LOCAL SOURCE ONLY (NOT freeware, no downloads)
+    //
+    // Dune 2000 was never released as freeware. We support extraction from
+    // local copies the user already owns (retail disc, GOG, etc.).
+    // ══════════════════════════════════════════════════════════════════════
+    ContentPackage {
+        id: PackageId::Dune2000Base,
+        game: GameId::Dune2000,
+        title: "Dune 2000 Game (local source only)",
+        required: true,
+        test_files: &[
+            "DUNE2000.EXE",
+            "SETUP.Z",
+            "LEPTON.FNT",
+            "ICON.ICN",
+            "MOUSE.SHP",
+        ],
+        sources: &[SourceId::Dune2000Disc, SourceId::GogDune2000],
+        download: None, // NOT freeware — no download
     },
 ];

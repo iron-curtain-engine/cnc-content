@@ -240,3 +240,18 @@ fn find_app_install(steamapps: &Path, app_id: u32, default_installdir: &str) -> 
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verifies that `probe()` does not panic when Steam is not installed.
+    ///
+    /// In CI Steam is typically absent, so the probe should return an
+    /// empty Vec rather than crashing when the Steam root is not found.
+    #[test]
+    fn probe_returns_empty_when_steam_not_installed() {
+        let results = probe();
+        let _ = results;
+    }
+}

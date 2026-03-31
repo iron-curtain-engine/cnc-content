@@ -1,20 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025–present Iron Curtain contributors
 
-//! RA1 content source definitions — where content can be obtained.
+//! Content source definitions — where content can be obtained.
 //!
 //! Each source carries SHA-1 ID file checks that identify the specific edition
-//! at a filesystem path. These hashes match OpenRA's published verification
+//! at a filesystem path. Red Alert hashes match OpenRA's published verification
 //! data exactly so source detection is compatible across both projects.
 
 use crate::{ContentSource, IdFileCheck, PlatformHint, SourceId, SourceType};
 
-/// All known RA1 content sources.
+/// All known content sources across all games.
 ///
 /// Sources are ordered by detection priority: disc editions first (for users
 /// with physical media), then digital storefronts, then standalone downloads.
 pub static ALL_SOURCES: &[ContentSource] = &[
-    // ── Disc sources ───────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════
+    // Red Alert sources
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── Disc sources ──────────────────────────────────────────────────
     ContentSource {
         id: SourceId::AlliedDisc,
         title: "Red Alert Allied Disc",
@@ -87,7 +91,7 @@ pub static ALL_SOURCES: &[ContentSource] = &[
         ],
         platform_hint: None,
     },
-    // ── The First Decade (InstallShield CAB) ───────────────────────────
+    // ── The First Decade (InstallShield CAB) ──────────────────────────
     ContentSource {
         id: SourceId::TheFirstDecade,
         title: "C&C: The First Decade",
@@ -106,7 +110,7 @@ pub static ALL_SOURCES: &[ContentSource] = &[
         ],
         platform_hint: None,
     },
-    // ── Standalone / registry sources ──────────────────────────────────
+    // ── Standalone / registry sources ─────────────────────────────────
     ContentSource {
         id: SourceId::Cnc95,
         title: "C&C95 Disc",
@@ -118,7 +122,7 @@ pub static ALL_SOURCES: &[ContentSource] = &[
         }],
         platform_hint: None,
     },
-    // ── Steam sources ──────────────────────────────────────────────────
+    // ── Steam sources ─────────────────────────────────────────────────
     ContentSource {
         id: SourceId::SteamTuc,
         title: "Steam — The Ultimate Collection (RA)",
@@ -152,7 +156,7 @@ pub static ALL_SOURCES: &[ContentSource] = &[
         }],
         platform_hint: Some(PlatformHint::SteamAppId(1213210)),
     },
-    // ── Origin / EA App sources ────────────────────────────────────────
+    // ── Origin / EA App sources ───────────────────────────────────────
     ContentSource {
         id: SourceId::OriginTuc,
         title: "Origin — The Ultimate Collection (RA)",
@@ -194,5 +198,127 @@ pub static ALL_SOURCES: &[ContentSource] = &[
             key: r"SOFTWARE\Petroglyph\CnCRemastered",
             value: "Install Dir",
         }),
+    },
+    // ══════════════════════════════════════════════════════════════════════
+    // Tiberian Dawn sources — freeware since 2007
+    // ══════════════════════════════════════════════════════════════════════
+    ContentSource {
+        id: SourceId::TdGdiDisc,
+        title: "Tiberian Dawn GDI Disc",
+        source_type: SourceType::Disc,
+        id_files: &[IdFileCheck {
+            path: "CONQUER.MIX",
+            sha1: "713b53fa4c188ca9619c6bbeadbfc86513704266",
+            prefix_length: None,
+        }],
+        platform_hint: None,
+    },
+    ContentSource {
+        id: SourceId::TdNodDisc,
+        title: "Tiberian Dawn Nod Disc",
+        source_type: SourceType::Disc,
+        id_files: &[IdFileCheck {
+            path: "CONQUER.MIX",
+            sha1: "713b53fa4c188ca9619c6bbeadbfc86513704266",
+            prefix_length: None,
+        }],
+        platform_hint: None,
+    },
+    ContentSource {
+        id: SourceId::TdCovertOpsDisc,
+        title: "Covert Operations Disc",
+        source_type: SourceType::Disc,
+        id_files: &[IdFileCheck {
+            path: "SC-000.MIX",
+            sha1: "0000000000000000000000000000000000000000",
+            prefix_length: None,
+        }],
+        platform_hint: None,
+    },
+    ContentSource {
+        id: SourceId::TdSteamCnc,
+        title: "Steam — C&C (Tiberian Dawn)",
+        source_type: SourceType::Steam,
+        id_files: &[IdFileCheck {
+            path: "CONQUER.MIX",
+            sha1: "713b53fa4c188ca9619c6bbeadbfc86513704266",
+            prefix_length: None,
+        }],
+        platform_hint: Some(PlatformHint::SteamAppId(2229830)),
+    },
+    ContentSource {
+        id: SourceId::TdSteamRemastered,
+        title: "Steam — C&C Remastered (TD data)",
+        source_type: SourceType::Steam,
+        id_files: &[IdFileCheck {
+            path: "Data/CNCDATA/TIBERIAN_DAWN/CD1/CONQUER.MIX",
+            sha1: "713b53fa4c188ca9619c6bbeadbfc86513704266",
+            prefix_length: None,
+        }],
+        platform_hint: Some(PlatformHint::SteamAppId(1213210)),
+    },
+    ContentSource {
+        id: SourceId::TdOriginCnc,
+        title: "Origin — C&C (Tiberian Dawn)",
+        source_type: SourceType::Origin,
+        id_files: &[IdFileCheck {
+            path: "CONQUER.MIX",
+            sha1: "713b53fa4c188ca9619c6bbeadbfc86513704266",
+            prefix_length: None,
+        }],
+        platform_hint: Some(PlatformHint::RegistryKey {
+            key: r"SOFTWARE\EA Games\CNC and The Covert Operations",
+            value: "Install Dir",
+        }),
+    },
+    // ══════════════════════════════════════════════════════════════════════
+    // Dune 2 sources — local only (NOT freeware, no downloads)
+    // ══════════════════════════════════════════════════════════════════════
+    ContentSource {
+        id: SourceId::Dune2Disc,
+        title: "Dune II Game Files",
+        source_type: SourceType::Disc,
+        id_files: &[IdFileCheck {
+            path: "DUNE2.EXE",
+            sha1: "0000000000000000000000000000000000000000",
+            prefix_length: None,
+        }],
+        platform_hint: None,
+    },
+    ContentSource {
+        id: SourceId::GogDune2,
+        title: "Dune II (GOG.com)",
+        source_type: SourceType::Gog,
+        id_files: &[IdFileCheck {
+            path: "DUNE2.EXE",
+            sha1: "0000000000000000000000000000000000000000",
+            prefix_length: None,
+        }],
+        platform_hint: Some(PlatformHint::GogGameId(1207658856)),
+    },
+    // ══════════════════════════════════════════════════════════════════════
+    // Dune 2000 sources — local only (NOT freeware, no downloads)
+    // ══════════════════════════════════════════════════════════════════════
+    ContentSource {
+        id: SourceId::Dune2000Disc,
+        title: "Dune 2000 Game Files",
+        source_type: SourceType::Disc,
+        id_files: &[IdFileCheck {
+            path: "DUNE2000.EXE",
+            sha1: "0000000000000000000000000000000000000000",
+            prefix_length: None,
+        }],
+        platform_hint: None,
+    },
+    ContentSource {
+        id: SourceId::GogDune2000,
+        title: "Dune 2000 (GOG.com)",
+        source_type: SourceType::Gog,
+        id_files: &[IdFileCheck {
+            path: "DUNE2000.EXE",
+            sha1: "0000000000000000000000000000000000000000",
+            prefix_length: None,
+        }],
+        platform_hint: Some(PlatformHint::GogGameId(1207659107)),
     },
 ];

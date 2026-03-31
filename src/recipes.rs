@@ -17,21 +17,21 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
     // ── Steam TUC (AppId 2229840) ─────────────────────────────────────
     InstallRecipe {
         source: SourceId::SteamTuc,
-        package: PackageId::Base,
+        package: PackageId::RaBase,
         actions: &[InstallAction::Copy {
             files: &BASE_DIRECT_COPY,
         }],
     },
     InstallRecipe {
         source: SourceId::SteamTuc,
-        package: PackageId::AftermathBase,
+        package: PackageId::RaAftermathBase,
         actions: &[InstallAction::Copy {
             files: &AFTERMATH_EXPAND_COPY,
         }],
     },
     InstallRecipe {
         source: SourceId::SteamTuc,
-        package: PackageId::Music,
+        package: PackageId::RaMusic,
         actions: &[InstallAction::ExtractMix {
             source_mix: "MAIN.MIX",
             entries: &[FileMapping {
@@ -42,24 +42,24 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
     },
     InstallRecipe {
         source: SourceId::SteamTuc,
-        package: PackageId::MoviesAllied,
+        package: PackageId::RaMoviesAllied,
         actions: &MOVIES_ALLIED_FROM_MAIN_MIX,
     },
     InstallRecipe {
         source: SourceId::SteamTuc,
-        package: PackageId::MoviesSoviet,
+        package: PackageId::RaMoviesSoviet,
         actions: &MOVIES_SOVIET_FROM_MAIN_MIX,
     },
     InstallRecipe {
         source: SourceId::SteamTuc,
-        package: PackageId::MusicCounterstrike,
+        package: PackageId::RaMusicCounterstrike,
         actions: &[InstallAction::Copy {
             files: &CS_MUSIC_COPY,
         }],
     },
     InstallRecipe {
         source: SourceId::SteamTuc,
-        package: PackageId::MusicAftermath,
+        package: PackageId::RaMusicAftermath,
         actions: &[InstallAction::Copy {
             files: &AM_MUSIC_COPY,
         }],
@@ -67,21 +67,21 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
     // ── Steam Remastered (AppId 1213210) ──────────────────────────────
     InstallRecipe {
         source: SourceId::SteamRemastered,
-        package: PackageId::Base,
+        package: PackageId::RaBase,
         actions: &[InstallAction::Copy {
             files: &REMASTERED_BASE_COPY,
         }],
     },
     InstallRecipe {
         source: SourceId::SteamRemastered,
-        package: PackageId::AftermathBase,
+        package: PackageId::RaAftermathBase,
         actions: &[InstallAction::Copy {
             files: &REMASTERED_AFTERMATH_COPY,
         }],
     },
     InstallRecipe {
         source: SourceId::SteamRemastered,
-        package: PackageId::CncDesert,
+        package: PackageId::RaCncDesert,
         actions: &[InstallAction::Copy {
             files: &[FileMapping {
                 from: "Data/CNCDATA/TIBERIAN_DAWN/CD1/DESERT.MIX",
@@ -91,7 +91,7 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
     },
     InstallRecipe {
         source: SourceId::SteamRemastered,
-        package: PackageId::Music,
+        package: PackageId::RaMusic,
         actions: &[InstallAction::ExtractMix {
             source_mix: "Data/CNCDATA/RED_ALERT/CD1/MAIN.MIX",
             entries: &[FileMapping {
@@ -102,14 +102,14 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
     },
     InstallRecipe {
         source: SourceId::SteamRemastered,
-        package: PackageId::MusicCounterstrike,
+        package: PackageId::RaMusicCounterstrike,
         actions: &[InstallAction::Copy {
             files: &REMASTERED_CS_MUSIC_COPY,
         }],
     },
     InstallRecipe {
         source: SourceId::SteamRemastered,
-        package: PackageId::MusicAftermath,
+        package: PackageId::RaMusicAftermath,
         actions: &[InstallAction::Copy {
             files: &REMASTERED_AM_MUSIC_COPY,
         }],
@@ -117,7 +117,7 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
     // ── Steam C&C (AppId 2229830) — desert only ──────────────────────
     InstallRecipe {
         source: SourceId::SteamCnc,
-        package: PackageId::CncDesert,
+        package: PackageId::RaCncDesert,
         actions: &[InstallAction::Copy {
             files: &[FileMapping {
                 from: "DESERT.MIX",
@@ -128,21 +128,21 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
     // ── Origin TUC (same layout as Steam TUC) ────────────────────────
     InstallRecipe {
         source: SourceId::OriginTuc,
-        package: PackageId::Base,
+        package: PackageId::RaBase,
         actions: &[InstallAction::Copy {
             files: &BASE_DIRECT_COPY,
         }],
     },
     InstallRecipe {
         source: SourceId::OriginTuc,
-        package: PackageId::AftermathBase,
+        package: PackageId::RaAftermathBase,
         actions: &[InstallAction::Copy {
             files: &AFTERMATH_EXPAND_COPY,
         }],
     },
     InstallRecipe {
         source: SourceId::OriginTuc,
-        package: PackageId::Music,
+        package: PackageId::RaMusic,
         actions: &[InstallAction::ExtractMix {
             source_mix: "MAIN.MIX",
             entries: &[FileMapping {
@@ -153,24 +153,24 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
     },
     InstallRecipe {
         source: SourceId::OriginTuc,
-        package: PackageId::MoviesAllied,
+        package: PackageId::RaMoviesAllied,
         actions: &MOVIES_ALLIED_FROM_MAIN_MIX,
     },
     InstallRecipe {
         source: SourceId::OriginTuc,
-        package: PackageId::MoviesSoviet,
+        package: PackageId::RaMoviesSoviet,
         actions: &MOVIES_SOVIET_FROM_MAIN_MIX,
     },
     InstallRecipe {
         source: SourceId::OriginTuc,
-        package: PackageId::MusicCounterstrike,
+        package: PackageId::RaMusicCounterstrike,
         actions: &[InstallAction::Copy {
             files: &CS_MUSIC_COPY,
         }],
     },
     InstallRecipe {
         source: SourceId::OriginTuc,
-        package: PackageId::MusicAftermath,
+        package: PackageId::RaMusicAftermath,
         actions: &[InstallAction::Copy {
             files: &AM_MUSIC_COPY,
         }],
@@ -178,7 +178,7 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
     // ── Origin C&C — desert only ─────────────────────────────────────
     InstallRecipe {
         source: SourceId::OriginCnc,
-        package: PackageId::CncDesert,
+        package: PackageId::RaCncDesert,
         actions: &[InstallAction::Copy {
             files: &[FileMapping {
                 from: "DESERT.MIX",
@@ -189,21 +189,21 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
     // ── Origin Remastered (same layout as Steam Remastered) ──────────
     InstallRecipe {
         source: SourceId::OriginRemastered,
-        package: PackageId::Base,
+        package: PackageId::RaBase,
         actions: &[InstallAction::Copy {
             files: &REMASTERED_BASE_COPY,
         }],
     },
     InstallRecipe {
         source: SourceId::OriginRemastered,
-        package: PackageId::AftermathBase,
+        package: PackageId::RaAftermathBase,
         actions: &[InstallAction::Copy {
             files: &REMASTERED_AFTERMATH_COPY,
         }],
     },
     InstallRecipe {
         source: SourceId::OriginRemastered,
-        package: PackageId::CncDesert,
+        package: PackageId::RaCncDesert,
         actions: &[InstallAction::Copy {
             files: &[FileMapping {
                 from: "Data/CNCDATA/TIBERIAN_DAWN/CD1/DESERT.MIX",
@@ -213,7 +213,7 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
     },
     InstallRecipe {
         source: SourceId::OriginRemastered,
-        package: PackageId::Music,
+        package: PackageId::RaMusic,
         actions: &[InstallAction::ExtractMix {
             source_mix: "Data/CNCDATA/RED_ALERT/CD1/MAIN.MIX",
             entries: &[FileMapping {
@@ -224,14 +224,14 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
     },
     InstallRecipe {
         source: SourceId::OriginRemastered,
-        package: PackageId::MusicCounterstrike,
+        package: PackageId::RaMusicCounterstrike,
         actions: &[InstallAction::Copy {
             files: &REMASTERED_CS_MUSIC_COPY,
         }],
     },
     InstallRecipe {
         source: SourceId::OriginRemastered,
-        package: PackageId::MusicAftermath,
+        package: PackageId::RaMusicAftermath,
         actions: &[InstallAction::Copy {
             files: &REMASTERED_AM_MUSIC_COPY,
         }],
@@ -239,7 +239,7 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
     // ── Allied Disc ───────────────────────────────────────────────────
     InstallRecipe {
         source: SourceId::AlliedDisc,
-        package: PackageId::Base,
+        package: PackageId::RaBase,
         actions: &[InstallAction::ExtractMix {
             source_mix: "INSTALL/REDALERT.MIX",
             entries: &BASE_FROM_REDALERT_MIX,
@@ -247,7 +247,7 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
     },
     InstallRecipe {
         source: SourceId::AlliedDisc,
-        package: PackageId::Music,
+        package: PackageId::RaMusic,
         actions: &[InstallAction::ExtractMix {
             source_mix: "MAIN.MIX",
             entries: &[FileMapping {
@@ -258,13 +258,13 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
     },
     InstallRecipe {
         source: SourceId::AlliedDisc,
-        package: PackageId::MoviesAllied,
+        package: PackageId::RaMoviesAllied,
         actions: &MOVIES_ALLIED_FROM_MAIN_MIX,
     },
     // ── Soviet Disc ───────────────────────────────────────────────────
     InstallRecipe {
         source: SourceId::SovietDisc,
-        package: PackageId::Base,
+        package: PackageId::RaBase,
         actions: &[InstallAction::ExtractMix {
             source_mix: "INSTALL/REDALERT.MIX",
             entries: &BASE_FROM_REDALERT_MIX,
@@ -272,7 +272,7 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
     },
     InstallRecipe {
         source: SourceId::SovietDisc,
-        package: PackageId::Music,
+        package: PackageId::RaMusic,
         actions: &[InstallAction::ExtractMix {
             source_mix: "MAIN.MIX",
             entries: &[FileMapping {
@@ -283,30 +283,30 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
     },
     InstallRecipe {
         source: SourceId::SovietDisc,
-        package: PackageId::MoviesSoviet,
+        package: PackageId::RaMoviesSoviet,
         actions: &MOVIES_SOVIET_FROM_MAIN_MIX,
     },
     // ── Aftermath Disc ────────────────────────────────────────────────
     InstallRecipe {
         source: SourceId::AftermathDisc,
-        package: PackageId::AftermathBase,
+        package: PackageId::RaAftermathBase,
         actions: &AFTERMATH_DISC_ACTIONS,
     },
     InstallRecipe {
         source: SourceId::AftermathDisc,
-        package: PackageId::MusicAftermath,
+        package: PackageId::RaMusicAftermath,
         actions: &AFTERMATH_DISC_MUSIC_ACTIONS,
     },
     // ── Counterstrike Disc ────────────────────────────────────────────
     InstallRecipe {
         source: SourceId::CounterstrikeDisc,
-        package: PackageId::MusicCounterstrike,
+        package: PackageId::RaMusicCounterstrike,
         actions: &CS_DISC_MUSIC_ACTIONS,
     },
     // ── The First Decade ──────────────────────────────────────────────
     InstallRecipe {
         source: SourceId::TheFirstDecade,
-        package: PackageId::Base,
+        package: PackageId::RaBase,
         actions: &[InstallAction::ExtractIscab {
             header: "data1.hdr",
             volumes: &[
@@ -321,7 +321,7 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
     },
     InstallRecipe {
         source: SourceId::TheFirstDecade,
-        package: PackageId::CncDesert,
+        package: PackageId::RaCncDesert,
         actions: &[InstallAction::ExtractIscab {
             header: "data1.hdr",
             volumes: &[
@@ -340,7 +340,7 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
     // ── C&C 95 ────────────────────────────────────────────────────────
     InstallRecipe {
         source: SourceId::Cnc95,
-        package: PackageId::CncDesert,
+        package: PackageId::RaCncDesert,
         actions: &[InstallAction::Copy {
             files: &[FileMapping {
                 from: "DESERT.MIX",

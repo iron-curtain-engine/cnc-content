@@ -3,45 +3,88 @@
 
 [package]
 name = "cnc-content"
-version = "0.1.0"
+version = "0.1.0-alpha.0"
 edition = "2021"
 rust-version = "1.88"
-description = "C&C content acquisition — download, verify, and manage Command & Conquer game content"
+description = "C&C content acquisition — download, verify, and manage Command & Conquer game content (Red Alert, Tiberian Dawn, Dune 2000)"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/iron-curtain-engine/cnc-content"
 authors = ["Iron Curtain contributors"]
-keywords = ["red-alert", "command-conquer", "content", "gamedev"]
+keywords = [
+    "red-alert",
+    "command-conquer",
+    "tiberian-dawn",
+    "content",
+    "gamedev",
+]
 categories = ["games", "command-line-utilities"]
 
 [[bin]]
 name = "cnc-content"
-path = "src/bin/main.rs"
+path = "src/bin/cnc_content/main.rs"
 required-features = ["cli"]
 
 [dependencies]
 app-path = "1.1"
-cnc-formats = { path = "../cnc-formats", default-features = false, features = [
+cnc-formats = { git = "https://github.com/iron-curtain-engine/cnc-formats.git", default-features = false, features = [
     "encrypted-mix",
 ] }
 serde = { version = "1", features = ["derive"] }
 sha1 = "0.11"
 sha2 = "0.11"
+flate2 = "1"
 strict-path = "0.1"
 thiserror = "2.0"
+toml = "1.1.1+spec-1.1.0"
 
 # CLI-only deps
 clap = { version = "4", features = ["derive", "env"], optional = true }
+console = { version = "0.16", optional = true }
+indicatif = { version = "0.18", optional = true }
+mimalloc = { version = "0.1", optional = true }
+
+# ZIP extraction (used by executor for install actions and by downloader)
+zip = { version = "8", default-features = false, features = ["deflate"] }
 
 # Download deps (also used by test provisioner)
 ureq = { version = "3", optional = true }
-zip = { version = "8", default-features = false, features = ["deflate"], optional = true }
+
+# Parallel verification + SIMD bitfields
+rayon = { version = "1", optional = true }
+wide = { version = "1.2.0", optional = true }
+
+# Torrent/P2P deps
+librqbit = { version = "8", optional = true }
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+], optional = true }
+urlencoding = { version = "2", optional = true }
 
 [features]
-default = ["cli", "download"]
-cli = ["dep:clap", "download"]
-download = ["dep:ureq", "dep:zip"]
+default = ["cli", "download", "fast-verify"]
+cli = ["dep:clap", "dep:console", "dep:indicatif", "dep:mimalloc", "download"]
+download = ["dep:ureq"]
+fast-verify = ["dep:rayon", "dep:wide"]
+torrent = ["dep:librqbit", "dep:tokio", "dep:urlencoding", "download"]
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
+
+# ── Release profile ────────────────────────────────────────────────────
+#
+# This binary is a CLI tool that users download and run. Optimize for:
+# 1. Throughput — SHA-1/SHA-256 hashing and zlib decompression are the
+#    hot paths during download/verify/extract. LTO + opt-level 3 lets
+#    LLVM inline across crate boundaries (sha2, flate2, zip).
+# 2. Binary size — single codegen unit + LTO + symbol stripping produce
+#    a compact binary. Users may download this over slow connections.
+# 3. Startup time — single codegen unit avoids cross-unit indirection.
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
 
 [dev-dependencies]

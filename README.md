@@ -1,13 +1,22 @@
 # cnc-content
 
 <p align="center">
+  <img src="images/logo.png" alt="Iron Curtain logo" width="280">
+</p>
+
+<p align="center">
   <a href="https://github.com/iron-curtain-engine/cnc-content/actions/workflows/ci.yml"><img src="https://github.com/iron-curtain-engine/cnc-content/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/iron-curtain-engine/cnc-content/actions/workflows/audit.yml"><img src="https://github.com/iron-curtain-engine/cnc-content/actions/workflows/audit.yml/badge.svg" alt="Security Audit"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg" alt="License"></a>
 </p>
 
 <p align="center">
-  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.85%2B-orange.svg" alt="Rust"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.88%2B-orange.svg" alt="Rust"></a>
+  &nbsp;&nbsp;
+  <img src="https://img.shields.io/badge/LM-ready-blueviolet.svg" alt="LM Ready"><br>
+  <img src="images/rust_inside.png" alt="Rust-based project" width="74">
+  &nbsp;
+  <img src="images/lm_ready.png" alt="LM Ready" width="74">
 </p>
 
 Download, verify, and manage Command & Conquer game content from any supported
@@ -15,80 +24,93 @@ source. Works as a standalone CLI tool or as a library for engine integration.
 
 ## What it does
 
-- **Defines** what RA1 content the game needs (packages, sources, downloads)
+- **Defines** what each game needs (packages, sources, downloads)
 - **Identifies** content sources on disk (discs, Steam, GOG, Origin installs)
-- **Downloads** content from OpenRA mirrors (with SHA-1 verification)
+- **Downloads** freeware content via HTTP mirrors (with SHA-1 verification)
 - **Extracts** content from MIX archives, InstallShield CABs, ZIPs, raw offsets
 - **Verifies** installed content integrity (SHA-256 manifests)
 
 ## Status
 
-> **Alpha / pre-1.0** — core download and verification pipeline is functional.
-> Source probes and P2P distribution are planned for future phases.
+> **Alpha / pre-1.0** — core download, verification, and source detection pipeline
+> is functional. P2P distribution is planned for future phases.
 
-## Supported Content Sources
+## Supported Games
 
-| Source | Type | Status |
-|--------|------|--------|
-| OpenRA HTTP mirrors | Download | Working |
-| Allied Disc | Disc | Defined |
-| Soviet Disc | Disc | Defined |
-| Aftermath Disc | Disc | Defined |
-| Counterstrike Disc | Disc | Defined |
-| The First Decade | InstallShield | Defined |
-| Steam TUC (AppId 2229840) | Steam | Defined |
-| Steam C&C (AppId 2229830) | Steam | Defined |
-| Steam Remastered (AppId 1213210) | Steam | Defined |
-| Origin TUC / C&C / Remastered | Origin | Defined |
-| C&C 1995 | Registry | Defined |
+| Game | Slug | Status |
+|------|------|--------|
+| Command & Conquer: Red Alert | `ra` | Freeware (EA, 2008) — downloadable |
+| Command & Conquer: Tiberian Dawn | `td` | Freeware (EA, 2007) — downloadable |
+| Dune II: The Building of a Dynasty | `dune2` | NOT freeware — local source only |
+| Dune 2000 | `dune2000` | NOT freeware — local source only |
 
-## Content Packages
+## Content Sources
 
-| Package | Required | Description |
-|---------|----------|-------------|
-| Base | Yes | Core RA1 data (allies.mix, conquer.mix, etc.) |
-| Aftermath Base | Yes | Expansion files (expand2.mix, loose AUDs) |
-| C&C Desert | Yes | Desert tileset from C&C (cnc/desert.mix) |
-| Music | No | Score music (scores.mix) |
-| Movies Allied | No | Allied campaign FMV cutscenes |
-| Movies Soviet | No | Soviet campaign FMV cutscenes |
-| Music Counterstrike | No | Counterstrike expansion music |
-| Music Aftermath | No | Aftermath expansion music |
+| Source | Type | Games |
+|--------|------|-------|
+| OpenRA HTTP mirrors | Download | RA, TD |
+| Archive.org / CNCNZ | Download | RA, TD |
+| Allied / Soviet / CS / AM Discs | Disc | RA |
+| GDI / Nod / Covert Ops Discs | Disc | TD |
+| The First Decade DVD | InstallShield | RA |
+| Steam — The Ultimate Collection | Steam | RA, TD |
+| Steam — C&C Remastered | Steam | RA, TD |
+| Origin / EA App | Origin | RA, TD |
+| GOG.com | GOG | Dune 2, Dune 2000 |
+| C&C 1995 (registry) | Registry | RA |
+| Dune 2 / Dune 2000 Discs | Disc | Dune 2, Dune 2000 |
 
 ## CLI
 
 Build with the `cli` feature (default) for the `cnc-content` command:
 
 ```sh
-cnc-content status              # show installed/missing packages
-cnc-content download            # download all required content
-cnc-content download --package aftermath   # download a specific package
-cnc-content verify              # check installed content integrity (SHA-256)
-cnc-content identify <path>     # identify a content source at a path
+cnc-content status                    # show installed/missing packages
+cnc-content download                  # download all required content
+cnc-content download --all            # download required + optional (music, movies)
+cnc-content download --package music  # download a specific package
+cnc-content -g td download            # download Tiberian Dawn content
+cnc-content verify                    # check installed content integrity
+cnc-content detect                    # scan for local content sources
+cnc-content install /path/to/source   # install from a local disc/Steam/GOG path
+cnc-content identify <path>           # identify a content source at a path
+cnc-content games                     # list supported games
 ```
 
 ### Options
 
 ```
---content-dir <path>   Content directory override
-                       (default: ~/.iron-curtain/content/ra/v1/)
-                       (env: IC_CONTENT_DIR)
+-g, --game <SLUG>      Game to manage (ra, td, dune2, dune2000) [default: ra]
+--content-dir <PATH>   Content directory override
+                       (default: <exe>/content/<slug>/v1/)
+                       (env: CNC_CONTENT_ROOT)
+--all                  Download optional content too (music, movies)
+--seed <POLICY>        Seeding policy (pause, always, keep, delete)
 ```
 
 ## Library Usage
 
 ```rust,no_run
-use cnc_content::{packages, sources, downloads, verify};
+use cnc_content::{GameId, packages, sources, downloads, verify};
 
-// Check if content is complete
+// Check if Red Alert content is complete
 let root = std::path::Path::new("~/.iron-curtain/content/ra/v1");
-if !cnc_content::is_content_complete(root) {
-    let missing = cnc_content::missing_required_packages(root);
+if !cnc_content::is_content_complete(root, GameId::RedAlert) {
+    let missing = cnc_content::missing_required_packages(root, GameId::RedAlert);
     for pkg in missing {
         eprintln!("missing: {}", pkg.title);
     }
 }
 ```
+
+## Features
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `cli` | Yes | `cnc-content` binary with progress bars (implies `download`) |
+| `download` | Yes | HTTP download + ZIP extraction (`ureq`, `zip`) |
+| `fast-verify` | Yes | Parallel SHA-256 verification via `rayon` + SIMD bitfields |
+| `torrent` | No | BitTorrent P2P transport via `librqbit` |
 
 ## Design
 
@@ -108,13 +130,8 @@ definitions from OpenRA's GPL-licensed data).
 - **OpenRA-compatible** — uses the same mirror infrastructure and file layout
 - **Feature-gated networking** — `download` feature pulls in `ureq` + `zip`;
   disable it for library-only use without HTTP dependencies
-
-## Features
-
-| Feature | Default | Description |
-|---------|---------|-------------|
-| `cli` | Yes | `cnc-content` binary (implies `download`) |
-| `download` | Yes | HTTP download + ZIP extraction (`ureq`, `zip`) |
+- **Freeware-only downloads** — only EA-declared freeware (RA, TD) can be
+  downloaded; Dune 2 and Dune 2000 require user-owned copies
 
 ## Design Documents
 

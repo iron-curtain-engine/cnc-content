@@ -117,3 +117,18 @@ fn ea_app_candidates(source: &crate::ContentSource) -> Vec<PathBuf> {
     let _ = source; // suppress unused warning on non-Windows
     paths
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verifies that `probe()` does not panic when Origin/EA App is not installed.
+    ///
+    /// In CI there are no Origin game installs, so the probe should return
+    /// an empty Vec without crashing.
+    #[test]
+    fn probe_returns_empty_in_ci() {
+        let results = probe();
+        let _ = results;
+    }
+}

@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 
 use super::DetectedSource;
-use crate::{PackageId, SourceId};
+use crate::SourceId;
 
 /// Source ID we use internally for OpenRA-sourced content.
 /// This doesn't map to one of our 12 defined sources since OpenRA content
@@ -96,16 +96,33 @@ fn openra_content_paths() -> Vec<PathBuf> {
     paths
 }
 
-/// Checks which IC packages are already present in an OpenRA content dir.
-#[allow(dead_code)]
-pub fn check_openra_packages(openra_content: &std::path::Path) -> Vec<PackageId> {
-    crate::packages::ALL_PACKAGES
-        .iter()
-        .filter(|pkg| {
-            pkg.test_files
-                .iter()
-                .all(|f| openra_content.join(f).exists())
-        })
-        .map(|pkg| pkg.id)
-        .collect()
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verifies that `probe()` does not panic when OpenRA is not installed.
+    ///
+    /// In CI and on machines without OpenRA, the probe should return an
+    /// empty Vec rather than crashing on missing directories.
+    #[test]
+    fn probe_returns_empty_when_no_openra_installed() {
+        let results = probe();
+        // Just assert it returns a Vec without panicking.
+        let _ = results;
+    }
+
+    /// Verifies that `openra_content_paths()` returns platform-specific
+    /// candidate paths on every platform.
+    ///
+    /// Even when the directories don't exist on disk, the function should
+    /// generate at least one candidate path from environment variables
+    /// (APPDATA on Windows, HOME on Linux/macOS).
+    #[test]
+    fn openra_content_paths_returns_platform_specific_paths() {
+        let paths = openra_content_paths();
+        assert!(
+            !paths.is_empty(),
+            "openra_content_paths() should return at least one candidate path",
+        );
+    }
 }

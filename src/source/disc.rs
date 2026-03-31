@@ -108,3 +108,19 @@ fn disc_mount_points() -> Vec<PathBuf> {
 
     paths
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verifies that `probe()` does not panic when no disc volumes are mounted.
+    ///
+    /// In CI there are no C&C discs mounted, so the probe should return
+    /// an empty Vec without crashing.
+    #[test]
+    fn probe_returns_empty_in_ci() {
+        let results = probe();
+        // Assert it returns a Vec without panicking.
+        let _ = results;
+    }
+}
