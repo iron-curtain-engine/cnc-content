@@ -208,21 +208,39 @@ data/
   trackers.txt        — BitTorrent tracker announce URLs (include_str!)
 src/
   lib.rs              — crate root, core types (GameId, PackageId, SeedingPolicy, etc.)
+  query.rs            — convenience lookup/filter functions (re-exported from lib.rs)
   actions.rs          — InstallAction enum (Copy, ExtractMix, ExtractZip, etc.)
   config.rs           — Config persistence (TOML), SeedingPolicy, speed limits
   downloads.rs        — HTTP download definitions (16 packages, RA + TD only)
-  downloader.rs       — HTTP download + parallel mirror racing (feature-gated: download)
-  executor.rs         — Install recipe executor (MIX, ISCAB, ZIP, raw, copy, delete)
-  iscab.rs            — InstallShield CAB v5/v6 archive reader (zlib decompression)
   packages.rs         — Content package definitions (15 packages, 4 games)
-  recipes.rs          — Install recipes (source × package action sequences)
-  session.rs          — ContentSession: high-level game content lifecycle API (feature-gated: download)
   sources.rs          — Content source definitions (23 sources with SHA-1 IDFiles)
-  streaming.rs        — Byte-range tracking, piece mapping, prebuffer policy, StreamingReader
-  torrent.rs          — P2P BitTorrent transport via librqbit (feature-gated: torrent)
   torrent_create.rs   — Deterministic .torrent file generation (bencode, info hash)
-  verify.rs           — Source identification + installed content verification (SHA-1/SHA-256)
-  tests.rs            — Cross-module integration tests
+  downloader/
+    mod.rs            — HTTP download + parallel mirror racing (feature-gated: download)
+    tests.rs          — downloader unit and security tests
+  executor/
+    mod.rs            — Install recipe executor (MIX, ISCAB, ZIP, raw, copy, delete)
+    tests.rs          — executor unit and path-traversal security tests
+  iscab/
+    mod.rs            — InstallShield CAB v5/v6 archive reader (zlib decompression)
+    tests.rs          — iscab unit tests
+  recipes/
+    mod.rs            — Install recipes (source × package action sequences); all RA
+  session/
+    mod.rs            — ContentSession: high-level game content lifecycle API (feature-gated: download)
+    tests.rs          — ContentSession unit and security tests
+  streaming/
+    mod.rs            — Byte-range tracking, piece mapping, prebuffer policy, StreamingReader
+    tests.rs          — streaming unit tests
+  torrent.rs          — P2P BitTorrent transport via librqbit (feature-gated: torrent)
+  verify/
+    mod.rs            — Source identification + installed content verification (SHA-1/SHA-256)
+    tests.rs          — verify unit tests
+  tests/
+    mod.rs            — Cross-module integration test root
+    core.rs           — GameId, package, and source invariant tests
+    downloads.rs      — Download resolution, mirror list, and seeding policy tests
+    post_download.rs  — Torrent hash validation and post-extraction manifest tests
   source/
     mod.rs            — detect_all() orchestrator
     steam.rs          — Steam library probe (VDF parsing, app ID matching)
@@ -233,8 +251,12 @@ src/
     disc.rs           — Mounted disc / ISO volume probe
     vdf.rs            — Valve Data Format (VDF/KeyValues) parser
   bin/cnc_content/
-    main.rs           — CLI entry point (status, download, verify, identify, games)
+    main.rs           — CLI entry point: Parser structs + main() dispatch (~240 lines)
     progress.rs       — Download progress display (indicatif progress bars, spinners)
+    commands/
+      mod.rs          — command submodule declarations
+      status.rs       — cmd_status, cmd_verify, cmd_detect, cmd_identify, cmd_games, cmd_seed_config
+      install.rs      — cmd_download, cmd_install, cmd_clean, cmd_torrent_create
 ```
 
 ### Rules

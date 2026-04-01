@@ -15,12 +15,17 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
-//! use cnc_content::torrent::{TorrentConfig, TorrentDownloader};
+//! Create a [`TorrentConfig`] (or use `Default`), construct a
+//! [`TorrentDownloader`], then call
+//! [`download_package`](TorrentDownloader::download_package) with the
+//! target [`DownloadPackage`](crate::downloads::DownloadPackage) and a
+//! progress callback.
 //!
-//! let config = TorrentConfig::default();
-//! let downloader = TorrentDownloader::new(config)?;
-//! downloader.download_package(package, content_root, |progress| { ... })?;
+//! ```
+//! // TorrentConfig is constructible with all defaults — no network required.
+//! let config = cnc_content::torrent::TorrentConfig::default();
+//! assert_eq!(config.max_upload_speed, 1_048_576); // 1 MB/s upload cap
+//! assert_eq!(config.max_download_speed, 0);        // 0 = unlimited
 //! ```
 
 use std::path::{Path, PathBuf};
