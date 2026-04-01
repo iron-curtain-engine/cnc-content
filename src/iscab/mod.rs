@@ -37,8 +37,11 @@ const FD_SIZE_V6: usize = 0x39;
 /// Errors from InstallShield CAB operations.
 #[derive(Debug, Error)]
 pub enum IscabError {
-    #[error("I/O error reading InstallShield archive: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("I/O error reading InstallShield archive: {source}")]
+    Io {
+        #[from]
+        source: std::io::Error,
+    },
 
     #[error(
         "invalid InstallShield signature: expected 0x{:08x}, got 0x{actual:08x}",
@@ -49,17 +52,17 @@ pub enum IscabError {
     #[error("unsupported InstallShield major version {major} (supported: 5, 6)")]
     UnsupportedVersion { major: u32 },
 
-    #[error("file not found in InstallShield archive: {0}")]
-    FileNotFound(String),
+    #[error("file not found in InstallShield archive: {name}")]
+    FileNotFound { name: String },
 
-    #[error("zlib decompression failed: {0}")]
-    Decompress(String),
+    #[error("zlib decompression failed: {detail}")]
+    Decompress { detail: String },
 
-    #[error("cabinet volume {0} not provided")]
-    MissingVolume(u32),
+    #[error("cabinet volume {volume} not provided")]
+    MissingVolume { volume: u32 },
 
-    #[error("corrupt archive: {0}")]
-    Corrupt(String),
+    #[error("corrupt archive: {detail}")]
+    Corrupt { detail: String },
 }
 
 /// A parsed file entry from the InstallShield header.
@@ -94,9 +97,9 @@ impl IscabArchive {
     pub fn open(header_path: &Path) -> Result<Self, IscabError> {
         let data = std::fs::read(header_path)?;
         if data.len() < 20 {
-            return Err(IscabError::Corrupt(
-                "header file too small (< 20 bytes)".into(),
-            ));
+            return Err(IscabError::Corrupt {
+                detail: "header file too small (< 20 bytes)".into(),
+            });
         }
 
         // ── Parse main header ────────────────────────────────────────
@@ -116,23 +119,26 @@ impl IscabArchive {
 
         // ── Parse cab descriptor ─────────────────────────────────────
         if cab_desc_offset + 0x24 > data.len() {
-            return Err(IscabError::Corrupt(
-                "cab descriptor offset out of bounds".into(),
-            ));
+            return Err(IscabError::Corrupt {
+                detail: "cab descriptor offset out of bounds".into(),
+            });
         }
 
-        let file_table_offset = cab_desc_offset + read_u32(&data, cab_desc_offset)? as usize;
+        let file_table_offset =
+            cab_desc_offset.saturating_add(read_u32(&data, cab_desc_offset)? as usize);
         let directory_count = read_u32(&data, cab_desc_offset + 0x0C)? as usize;
         let file_count = read_u32(&data, cab_desc_offset + 0x1C)? as usize;
         let file_table_offset2 =
-            cab_desc_offset + read_u32(&data, cab_desc_offset + 0x20)? as usize;
+            cab_desc_offset.saturating_add(read_u32(&data, cab_desc_offset + 0x20)? as usize);
 
         // ── Parse directory names ────────────────────────────────────
         // Directory entries are u32 offsets (relative to file_table_offset)
         // pointing to NUL-terminated strings.
         let mut directories = Vec::with_capacity(directory_count);
         for i in 0..directory_count {
-            let ptr_offset = file_table_offset + i * 4;
+            // Overflow-safe: i and 4 are both controlled, but cab-supplied
+            // directory_count could be large, so saturate instead of wrapping.
+            let ptr_offset = file_table_offset.saturating_add(i.saturating_mul(4));
             if ptr_offset + 4 > data.len() {
                 break;
             }
@@ -144,7 +150,8 @@ impl IscabArchive {
         // ── Parse file descriptors ───────────────────────────────────
         let mut entries = Vec::with_capacity(file_count);
         for i in 0..file_count {
-            let base = file_table_offset2 + i * fd_size;
+            // Overflow-safe: both i and fd_size come from untrusted data.
+            let base = file_table_offset2.saturating_add(i.saturating_mul(fd_size));
             if base + fd_size > data.len() {
                 break;
             }
@@ -221,13 +228,17 @@ impl IscabArchive {
                 e.full_path.to_ascii_lowercase() == name_lower
                     || e.name.to_ascii_lowercase() == name_lower
             })
-            .ok_or_else(|| IscabError::FileNotFound(name.to_string()))?;
+            .ok_or_else(|| IscabError::FileNotFound {
+                name: name.to_string(),
+            })?;
 
         let vol_path = volumes
             .iter()
             .find(|(idx, _)| *idx == entry.volume)
             .map(|(_, p)| *p)
-            .ok_or(IscabError::MissingVolume(entry.volume))?;
+            .ok_or(IscabError::MissingVolume {
+                volume: entry.volume,
+            })?;
 
         let mut file = std::fs::File::open(vol_path)?;
         file.seek(SeekFrom::Start(entry.data_offset))?;
@@ -257,7 +268,9 @@ fn decompress_zlib(data: &[u8], expected_size: usize) -> Result<Vec<u8>, IscabEr
     let mut out = Vec::with_capacity(expected_size);
     decoder
         .read_to_end(&mut out)
-        .map_err(|e| IscabError::Decompress(e.to_string()))?;
+        .map_err(|e| IscabError::Decompress {
+            detail: e.to_string(),
+        })?;
     Ok(out)
 }
 
@@ -266,7 +279,9 @@ fn read_u32(data: &[u8], offset: usize) -> Result<u32, IscabError> {
     let bytes: [u8; 4] = data
         .get(offset..offset.saturating_add(4))
         .and_then(|s| s.try_into().ok())
-        .ok_or_else(|| IscabError::Corrupt(format!("u32 read at offset {offset} out of bounds")))?;
+        .ok_or_else(|| IscabError::Corrupt {
+            detail: format!("u32 read at offset {offset} out of bounds"),
+        })?;
     Ok(u32::from_le_bytes(bytes))
 }
 
@@ -275,7 +290,9 @@ fn read_u16(data: &[u8], offset: usize) -> Result<u16, IscabError> {
     let bytes: [u8; 2] = data
         .get(offset..offset.saturating_add(2))
         .and_then(|s| s.try_into().ok())
-        .ok_or_else(|| IscabError::Corrupt(format!("u16 read at offset {offset} out of bounds")))?;
+        .ok_or_else(|| IscabError::Corrupt {
+            detail: format!("u16 read at offset {offset} out of bounds"),
+        })?;
     Ok(u16::from_le_bytes(bytes))
 }
 
@@ -284,7 +301,9 @@ fn read_u64(data: &[u8], offset: usize) -> Result<u64, IscabError> {
     let bytes: [u8; 8] = data
         .get(offset..offset.saturating_add(8))
         .and_then(|s| s.try_into().ok())
-        .ok_or_else(|| IscabError::Corrupt(format!("u64 read at offset {offset} out of bounds")))?;
+        .ok_or_else(|| IscabError::Corrupt {
+            detail: format!("u64 read at offset {offset} out of bounds"),
+        })?;
     Ok(u64::from_le_bytes(bytes))
 }
 

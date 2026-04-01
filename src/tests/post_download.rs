@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025–present Iron Curtain contributors
 
+//! Integration tests for torrent hash validation and post-extraction manifests.
+//!
+//! Verifies that Archive.org info hashes are well-formed hex strings, and that
+//! manifest generation produces valid SHA-256 entries for installed content.
+
 use super::super::*;
 
 // ── Archive.org torrent hash validation ────────────────────────────────
@@ -74,7 +79,7 @@ fn manifest_generation_for_installed_content() {
     std::fs::create_dir_all(&tmp).unwrap();
 
     // Create fake installed content files matching RA base package test files.
-    let ra_base = crate::package(PackageId::RaBase);
+    let ra_base = crate::package(PackageId::RaBase).unwrap();
     for test_file in ra_base.test_files {
         let path = tmp.join(test_file);
         if let Some(parent) = path.parent() {

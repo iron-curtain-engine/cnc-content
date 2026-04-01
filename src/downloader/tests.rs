@@ -1,3 +1,8 @@
+//! Unit and security tests for the HTTP downloader.
+//!
+//! Covers happy-path downloads, parallel mirror racing, SHA-1 verification,
+//! and adversarial inputs (path traversal, mismatched hashes).
+
 use super::*;
 
 /// Creates an in-memory ZIP archive and writes it to `dest`.
@@ -84,10 +89,11 @@ fn extract_zip_rejects_absolute_path_entry() {
 
 /// Verifies that a ZIP entry using backslash-based path traversal is rejected.
 ///
-/// Some attackers use `..\\` separators as an evasion technique, relying on
-/// extractors that normalise only forward-slash separators. An entry named
-/// `..\\..\\etc\\passwd` must be treated as traversal and blocked regardless
-/// of the separator character used.
+/// On Windows, backslashes are path separators, so `..\\..\\etc\\passwd`
+/// is genuine traversal that `strict-path` rejects. On Unix, backslashes
+/// are literal filename characters — the entry name is a single valid
+/// component, not traversal. This test only applies to Windows.
+#[cfg(target_os = "windows")]
 #[test]
 fn extract_zip_rejects_backslash_traversal() {
     let tmp = std::env::temp_dir().join("cnc-zip-slip-backslash");

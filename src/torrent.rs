@@ -18,7 +18,7 @@
 //! Create a [`TorrentConfig`] (or use `Default`), construct a
 //! [`TorrentDownloader`], then call
 //! [`download_package`](TorrentDownloader::download_package) with the
-//! target [`DownloadPackage`](crate::downloads::DownloadPackage) and a
+//! target [`DownloadPackage`](crate::DownloadPackage) and a
 //! progress callback.
 //!
 //! ```
@@ -36,14 +36,17 @@ use thiserror::Error;
 /// Errors from torrent operations.
 #[derive(Debug, Error)]
 pub enum TorrentError {
-    #[error("librqbit session error: {0}")]
-    Session(String),
-    #[error("torrent download failed: {0}")]
-    Download(String),
+    #[error("librqbit session error: {message}")]
+    Session { message: String },
+    #[error("torrent download failed: {message}")]
+    Download { message: String },
     #[error("no info_hash or torrent file available for this package")]
     NoTorrentMetadata,
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("I/O error: {source}")]
+    Io {
+        #[from]
+        source: std::io::Error,
+    },
 }
 
 /// Configuration for P2P downloads.
@@ -137,7 +140,9 @@ impl TorrentDownloader {
             .enable_all()
             .worker_threads(2)
             .build()
-            .map_err(|e| TorrentError::Session(e.to_string()))?;
+            .map_err(|e| TorrentError::Session {
+                message: e.to_string(),
+            })?;
 
         let session = runtime.block_on(async {
             let session_opts = librqbit::SessionOptions {
@@ -148,7 +153,9 @@ impl TorrentDownloader {
 
             librqbit::Session::new_with_opts(config.session_dir.clone(), session_opts)
                 .await
-                .map_err(|e| TorrentError::Session(e.to_string()))
+                .map_err(|e| TorrentError::Session {
+                    message: e.to_string(),
+                })
         })?;
 
         Ok(Self {
@@ -213,15 +220,21 @@ impl TorrentDownloader {
                 .session
                 .add_torrent(librqbit::AddTorrent::from_url(&magnet), Some(add_opts))
                 .await
-                .map_err(|e| TorrentError::Download(e.to_string()))?
+                .map_err(|e| TorrentError::Download {
+                    message: e.to_string(),
+                })?
                 .into_handle()
-                .ok_or_else(|| TorrentError::Download("failed to get torrent handle".into()))?;
+                .ok_or_else(|| TorrentError::Download {
+                    message: "failed to get torrent handle".into(),
+                })?;
 
             // Wait for download to complete.
             handle
                 .wait_until_completed()
                 .await
-                .map_err(|e| TorrentError::Download(e.to_string()))?;
+                .map_err(|e| TorrentError::Download {
+                    message: e.to_string(),
+                })?;
 
             // The session owns the torrent — dropping the handle doesn't stop it.
             // Seeding continues as long as the session is alive, regardless of

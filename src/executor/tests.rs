@@ -1,3 +1,9 @@
+//! Unit tests for the install recipe executor.
+//!
+//! Covers MIX extraction, ISCAB extraction, ZIP extraction, raw-offset
+//! extraction, file copy, and delete actions, plus path-traversal security
+//! tests verifying that `strict-path` boundaries are enforced.
+
 use super::*;
 use crate::actions::{FileMapping, RawExtractEntry};
 
@@ -370,10 +376,12 @@ static TRAVERSAL_SOURCE_ACTIONS: [InstallAction; 1] = [InstallAction::Copy {
     files: &TRAVERSAL_SOURCE_FILES,
 }];
 
+#[cfg(target_os = "windows")]
 static TRAVERSAL_BACKSLASH_FILES: [FileMapping; 1] = [FileMapping {
     from: "allies.mix",
     to: "..\\..\\escaped.txt",
 }];
+#[cfg(target_os = "windows")]
 static TRAVERSAL_BACKSLASH_ACTIONS: [InstallAction; 1] = [InstallAction::Copy {
     files: &TRAVERSAL_BACKSLASH_FILES,
 }];
@@ -447,8 +455,12 @@ fn executor_rejects_source_path_traversal() {
 
 /// Rejects backslash-style path traversal in the `to` field.
 ///
-/// Windows-style backslash separators can bypass naive forward-slash-only
-/// traversal checks. The boundary must normalise both separator styles.
+/// On Windows, backslashes are path separators, so `..\\..\\escaped.txt`
+/// is a genuine traversal attack that `strict-path` must reject.
+/// On Unix, backslashes are literal filename characters — `..\\..\\`
+/// is a single valid filename component, not traversal. This test
+/// only applies to Windows.
+#[cfg(target_os = "windows")]
 #[test]
 fn executor_rejects_backslash_traversal() {
     let tmp = std::env::temp_dir().join("cnc-exec-traversal-backslash");
@@ -548,7 +560,9 @@ fn executor_error_display_path_traversal() {
 /// which source file was absent in multi-action recipes.
 #[test]
 fn executor_error_display_source_file_not_found() {
-    let err = ExecutorError::SourceFileNotFound(PathBuf::from("missing/file.dat"));
+    let err = ExecutorError::SourceFileNotFound {
+        path: PathBuf::from("missing/file.dat"),
+    };
     let msg = err.to_string();
     assert!(msg.contains("missing/file.dat"), "message was: {msg}");
 }
@@ -583,7 +597,10 @@ fn executor_extract_zip_missing_source() {
         &dst,
         noop_progress,
     );
-    assert!(matches!(result, Err(ExecutorError::SourceFileNotFound(..))));
+    assert!(matches!(
+        result,
+        Err(ExecutorError::SourceFileNotFound { .. })
+    ));
 
     let _ = fs::remove_dir_all(&tmp);
 }

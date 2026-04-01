@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025–present Iron Curtain contributors
 
+//! Integration tests for download resolution, mirror lists, and seeding policy.
+//!
+//! Verifies that every `DownloadId` has a populated definition, mirror URLs
+//! are well-formed, and seeding-policy selection logic is correct.
+
 use super::super::*;
 
 // ── Download tests ──────────────────────────────────────────────────
@@ -33,7 +38,7 @@ fn all_download_ids_have_definitions() {
         DownloadId::TdNodIso,
     ];
     for id in ids {
-        let dl = download(id);
+        let dl = download(id).unwrap();
         assert_eq!(dl.id, id);
         assert!(!dl.title.is_empty());
         assert!(!dl.provides.is_empty());
@@ -171,7 +176,12 @@ fn download_sha1_hashes_are_valid_hex() {
 fn every_package_source_exists() {
     for pkg in packages::ALL_PACKAGES {
         for &src_id in pkg.sources {
-            let _ = source(src_id);
+            assert!(
+                source(src_id).is_some(),
+                "Package {:?} references source {:?} which has no definition",
+                pkg.id,
+                src_id,
+            );
         }
     }
 }
@@ -185,7 +195,7 @@ fn every_package_source_exists() {
 fn every_package_download_exists() {
     for pkg in packages::ALL_PACKAGES {
         if let Some(dl_id) = pkg.download {
-            let dl = download(dl_id);
+            let dl = download(dl_id).unwrap();
             assert!(
                 dl.provides.contains(&pkg.id),
                 "Download {:?} should provide package {:?}",
@@ -205,7 +215,7 @@ fn every_package_download_exists() {
 fn download_game_matches_package_game() {
     for dl in downloads::ALL_DOWNLOADS {
         for &pkg_id in dl.provides {
-            let pkg = package(pkg_id);
+            let pkg = package(pkg_id).unwrap();
             assert_eq!(
                 dl.game, pkg.game,
                 "Download {:?} game {:?} doesn't match package {:?} game {:?}",

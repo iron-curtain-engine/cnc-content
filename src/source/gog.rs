@@ -11,7 +11,9 @@ use std::path::PathBuf;
 
 use super::{packages_for_source, DetectedSource};
 use crate::sources::ALL_SOURCES;
-use crate::{PlatformHint, SourceType};
+#[cfg(target_os = "windows")]
+use crate::PlatformHint;
+use crate::SourceType;
 
 /// Probes for GOG.com installs of C&C games.
 pub fn probe() -> Vec<DetectedSource> {
@@ -137,13 +139,14 @@ fn gog_filesystem_candidates(source: &crate::ContentSource) -> Vec<PathBuf> {
         }
     }
 
-    let _ = source; // suppress unused warning on other platforms
     paths
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Probe smoke tests ─────────────────────────────────────────
 
     /// Verifies that `probe()` does not panic when no GOG installs are found.
     ///
@@ -154,6 +157,8 @@ mod tests {
         let results = probe();
         let _ = results;
     }
+
+    // ── Candidate path generation ───────────────────────────────
 
     /// Verifies that `gog_filesystem_candidates()` returns non-empty candidate
     /// paths for each GOG source definition.

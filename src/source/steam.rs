@@ -245,6 +245,8 @@ fn find_app_install(steamapps: &Path, app_id: u32, default_installdir: &str) -> 
 mod tests {
     use super::*;
 
+    // ── Probe smoke tests ─────────────────────────────────────────
+
     /// Verifies that `probe()` does not panic when Steam is not installed.
     ///
     /// In CI Steam is typically absent, so the probe should return an

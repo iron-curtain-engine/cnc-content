@@ -90,6 +90,8 @@ pub fn config_path() -> PathBuf {
 mod tests {
     use super::*;
 
+    // ── Round-trip serialisation ────────────────────────────────────
+
     /// Serialising a default `Config` to TOML and deserialising it back preserves all fields.
     ///
     /// A config that has never been customised must survive a save/load cycle
@@ -130,6 +132,8 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
+
+    // ── Load error paths ───────────────────────────────────────
 
     /// Loading from a path that does not exist returns `None`.
     ///
@@ -239,6 +243,8 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
+
+    // ── Boundary values ─────────────────────────────────────────────────────
 
     /// Zero values for both speed limits round-trip through TOML correctly.
     ///

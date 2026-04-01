@@ -8,18 +8,31 @@
 //! This includes the CnC95 freeware download, standalone RA installs from
 //! the late 1990s, and The First Decade DVD installer.
 
+#[cfg(target_os = "windows")]
 use std::path::PathBuf;
 
-use super::{packages_for_source, DetectedSource};
-use crate::sources::ALL_SOURCES;
-use crate::{PlatformHint, SourceType};
+use super::DetectedSource;
 
 /// Probes Windows registry keys for legacy C&C game installs.
 ///
 /// Iterates all source definitions that have `PlatformHint::RegistryKey`
 /// and are NOT `SourceType::Origin` (those are handled by the Origin probe).
 /// On non-Windows platforms, this returns an empty list.
+#[cfg(not(target_os = "windows"))]
 pub fn probe() -> Vec<DetectedSource> {
+    Vec::new()
+}
+
+/// Probes Windows registry keys for legacy C&C game installs.
+///
+/// Iterates all source definitions that have `PlatformHint::RegistryKey`
+/// and are NOT `SourceType::Origin` (those are handled by the Origin probe).
+#[cfg(target_os = "windows")]
+pub fn probe() -> Vec<DetectedSource> {
+    use super::packages_for_source;
+    use crate::sources::ALL_SOURCES;
+    use crate::{PlatformHint, SourceType};
+
     let mut results = Vec::new();
 
     for source in ALL_SOURCES.iter().filter(|s| {
@@ -46,15 +59,13 @@ pub fn probe() -> Vec<DetectedSource> {
 }
 
 /// Reads install directory from the Windows registry for a source.
+#[cfg(target_os = "windows")]
 fn find_registry_install(source: &crate::ContentSource) -> Option<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        if let Some(PlatformHint::RegistryKey { key, value }) = source.platform_hint {
-            return read_registry_path(key, value);
-        }
-    }
+    use crate::PlatformHint;
 
-    let _ = source; // suppress unused warning on non-Windows
+    if let Some(PlatformHint::RegistryKey { key, value }) = source.platform_hint {
+        return read_registry_path(key, value);
+    }
     None
 }
 
@@ -105,6 +116,8 @@ fn read_registry_path(key_path: &str, value_name: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Probe smoke tests ─────────────────────────────────────────
 
     /// Verifies that `probe()` does not panic when no legacy registry keys exist.
     ///

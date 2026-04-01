@@ -42,7 +42,10 @@ pub fn cmd_download(
     if let Some(name) = package_name {
         // ── Single named package download ────────────────────────────
         let dl_id = resolve_download_name(name, game);
-        let pkg = cnc_content::download(dl_id);
+        let pkg = cnc_content::download(dl_id).unwrap_or_else(|| {
+            eprintln!("Internal error: no download definition for {dl_id:?}");
+            std::process::exit(1);
+        });
         let strategy = cnc_content::downloader::select_strategy(pkg);
         progress::print_section_header(pkg.title, &format!("{strategy:?}"));
         let mut display = progress::ProgressDisplay::new(pkg.title);
@@ -83,16 +86,18 @@ pub fn cmd_download(
                 // Skip downloads that only provide required packages
                 // (already handled above).
                 dl.provides.iter().any(|&pkg_id| {
-                    let pkg = cnc_content::package(pkg_id);
-                    !pkg.required
+                    cnc_content::package(pkg_id)
+                        .map(|p| !p.required)
+                        .unwrap_or(false)
                 })
             })
             .collect();
 
         for dl in optional_downloads {
             let already_installed = dl.provides.iter().all(|&pkg_id| {
-                let pkg = cnc_content::package(pkg_id);
-                pkg.test_files.iter().all(|f| content_root.join(f).exists())
+                cnc_content::package(pkg_id)
+                    .map(|p| p.test_files.iter().all(|f| content_root.join(f).exists()))
+                    .unwrap_or(false)
             });
 
             if already_installed {
@@ -165,7 +170,10 @@ pub fn cmd_install(
         }
     };
 
-    let source_def = cnc_content::source(source_id);
+    let source_def = cnc_content::source(source_id).unwrap_or_else(|| {
+        eprintln!("Internal error: no source definition for {source_id:?}");
+        std::process::exit(1);
+    });
     println!(
         "Source: {} ({:?})",
         source_def.title, source_def.source_type
@@ -202,7 +210,13 @@ pub fn cmd_install(
     let mut total_errors = 0;
 
     for recipe in &recipes {
-        let pkg = cnc_content::package(recipe.package);
+        let pkg = cnc_content::package(recipe.package).unwrap_or_else(|| {
+            eprintln!(
+                "Internal error: no package definition for {:?}",
+                recipe.package
+            );
+            std::process::exit(1);
+        });
         println!("── {} ──", pkg.title);
 
         match cnc_content::executor::execute_recipe(recipe, source_path, content_root, |progress| {
@@ -250,7 +264,15 @@ pub fn cmd_install(
 
     // Determine game from the first recipe's package.
     if let Some(first) = recipes.first() {
-        let game = cnc_content::package(first.package).game;
+        let game = cnc_content::package(first.package)
+            .unwrap_or_else(|| {
+                eprintln!(
+                    "Internal error: no package definition for {:?}",
+                    first.package
+                );
+                std::process::exit(1);
+            })
+            .game;
         println!();
         cmd_status(content_root, game);
     }

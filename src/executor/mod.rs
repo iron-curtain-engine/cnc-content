@@ -44,8 +44,11 @@ pub enum InstallProgress {
 /// Errors that can occur during install action execution.
 #[derive(Debug, Error)]
 pub enum ExecutorError {
-    #[error("I/O error during install: {0}")]
-    Io(#[from] io::Error),
+    #[error("I/O error during install: {source}")]
+    Io {
+        #[from]
+        source: io::Error,
+    },
 
     #[error("MIX archive not found at source: {path}")]
     MixNotFound { path: PathBuf },
@@ -53,14 +56,17 @@ pub enum ExecutorError {
     #[error("MIX entry not found: {entry} in {archive}")]
     MixEntryNotFound { archive: String, entry: String },
 
-    #[error("InstallShield CAB error: {0}")]
-    Iscab(#[from] crate::iscab::IscabError),
+    #[error("InstallShield CAB error: {source}")]
+    Iscab {
+        #[from]
+        source: crate::iscab::IscabError,
+    },
 
-    #[error("ZIP extraction error: {0}")]
-    ZipError(String),
+    #[error("ZIP extraction error: {detail}")]
+    ZipError { detail: String },
 
-    #[error("source file not found: {0}")]
-    SourceFileNotFound(PathBuf),
+    #[error("source file not found: {path}")]
+    SourceFileNotFound { path: PathBuf },
 
     #[error("path traversal blocked: \"{path}\" escapes boundary ({detail})")]
     PathTraversal { path: String, detail: String },
@@ -268,7 +274,9 @@ fn extract_raw_entry(
 ) -> Result<u64, ExecutorError> {
     let src = bounded_path(source, entry.source)?;
     if !src.exists() {
-        return Err(ExecutorError::SourceFileNotFound(src.unstrict()));
+        return Err(ExecutorError::SourceFileNotFound {
+            path: src.unstrict(),
+        });
     }
 
     let mut file = src.open_file()?;
@@ -362,7 +370,9 @@ fn extract_from_zip(
                 files_written += 1;
                 total_bytes += bytes;
             } else {
-                return Err(ExecutorError::SourceFileNotFound(src.unstrict()));
+                return Err(ExecutorError::SourceFileNotFound {
+                    path: src.unstrict(),
+                });
             }
         }
     }
@@ -384,15 +394,18 @@ fn extract_zip_entry(
     let parts: Vec<&str> = from_path.split('/').collect();
 
     for split_at in 1..=parts.len() {
-        let zip_rel: String = parts[..split_at].join("/");
+        let zip_rel: String = parts.get(..split_at).unwrap_or(&parts).join("/");
         let zip_strict = bounded_path(source, &zip_rel)?;
 
         if zip_strict.is_file() && split_at < parts.len() {
-            let entry_name: String = parts[split_at..].join("/");
+            let entry_name: String = parts.get(split_at..).unwrap_or(&[]).join("/");
 
             let file = zip_strict.open_file()?;
-            let mut archive = zip::ZipArchive::new(io::BufReader::new(file))
-                .map_err(|e| ExecutorError::ZipError(e.to_string()))?;
+            let mut archive = zip::ZipArchive::new(io::BufReader::new(file)).map_err(|e| {
+                ExecutorError::ZipError {
+                    detail: e.to_string(),
+                }
+            })?;
 
             // Try exact match first, then case-insensitive.
             let entry_index = archive
@@ -405,16 +418,15 @@ fn extract_zip_entry(
                             .is_some_and(|n| n.to_ascii_lowercase() == lower)
                     })
                 })
-                .ok_or_else(|| {
-                    ExecutorError::ZipError(format!(
-                        "entry '{entry_name}' not found in {}",
-                        zip_rel
-                    ))
+                .ok_or_else(|| ExecutorError::ZipError {
+                    detail: format!("entry '{entry_name}' not found in {}", zip_rel),
                 })?;
 
             let mut entry = archive
                 .by_index(entry_index)
-                .map_err(|e| ExecutorError::ZipError(e.to_string()))?;
+                .map_err(|e| ExecutorError::ZipError {
+                    detail: e.to_string(),
+                })?;
 
             // Validate output path against the content boundary.
             let dst = bounded_path(content, to_path)?;

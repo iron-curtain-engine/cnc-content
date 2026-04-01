@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.88%2B-orange.svg" alt="Rust"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.89%2B-orange.svg" alt="Rust"></a>
   &nbsp;&nbsp;
   <img src="https://img.shields.io/badge/LM-ready-blueviolet.svg" alt="LM Ready"><br>
   <img src="images/rust_inside.png" alt="Rust-based project" width="74">
@@ -60,6 +60,23 @@ source. Works as a standalone CLI tool or as a library for engine integration.
 | C&C 1995 (registry) | Registry | RA |
 | Dune 2 / Dune 2000 Discs | Disc | Dune 2, Dune 2000 |
 
+## Installation
+
+Install from source with Cargo:
+
+```sh
+cargo install --git https://github.com/iron-curtain-engine/cnc-content.git
+```
+
+Or build locally:
+
+```sh
+git clone https://github.com/iron-curtain-engine/cnc-content.git
+cd cnc-content
+cargo build --release
+# Binary at target/release/cnc-content(.exe)
+```
+
 ## CLI
 
 Build with the `cli` feature (default) for the `cnc-content` command:
@@ -75,26 +92,37 @@ cnc-content detect                    # scan for local content sources
 cnc-content install /path/to/source   # install from a local disc/Steam/GOG path
 cnc-content identify <path>           # identify a content source at a path
 cnc-content games                     # list supported games
+cnc-content clean                     # remove all downloaded content
+cnc-content seed-config               # show current P2P seeding policy
+cnc-content seed-config always        # change seeding policy
+cnc-content torrent-create            # generate .torrent files (maintainer tool)
 ```
 
-### Options
+### Global Options
 
 ```
 -g, --game <SLUG>      Game to manage (ra, td, dune2, dune2000) [default: ra]
 --content-dir <PATH>   Content directory override
-                       (default: <exe>/content/<slug>/v1/)
+                       (default: portable, next to executable)
                        (env: CNC_CONTENT_ROOT)
+--openra               Use OpenRA's content directory (share files between engines)
+```
+
+### Download Options
+
+```
 --all                  Download optional content too (music, movies)
+--package <NAME>       Download a specific package by name
 --seed <POLICY>        Seeding policy (pause, always, keep, delete)
 ```
 
 ## Library Usage
 
-```rust,no_run
-use cnc_content::{GameId, packages, sources, downloads, verify};
+```rust
+use cnc_content::GameId;
 
 // Check if Red Alert content is complete
-let root = std::path::Path::new("~/.iron-curtain/content/ra/v1");
+let root = std::path::Path::new("/path/to/content/ra/v1");
 if !cnc_content::is_content_complete(root, GameId::RedAlert) {
     let missing = cnc_content::missing_required_packages(root, GameId::RedAlert);
     for pkg in missing {
@@ -111,6 +139,17 @@ if !cnc_content::is_content_complete(root, GameId::RedAlert) {
 | `download` | Yes | HTTP download + ZIP extraction (`ureq`, `zip`) |
 | `fast-verify` | Yes | Parallel SHA-256 verification via `rayon` + SIMD bitfields |
 | `torrent` | No | BitTorrent P2P transport via `librqbit` |
+
+## Environment Variables
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `CNC_CONTENT_ROOT` | Override the content directory | Portable path next to executable |
+| `CNC_MIRROR_LIST_URL` | Override the mirror list URL for all downloads | Per-package URL from download definitions |
+| `CNC_DOWNLOAD_TIMEOUT` | HTTP download timeout in seconds | `300` |
+| `CNC_NO_P2P` | Disable P2P transport (`1` = disabled) | `0` (P2P enabled when compiled in) |
+
+CLI flags take precedence over environment variables.
 
 ## Design
 

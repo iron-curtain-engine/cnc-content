@@ -1,3 +1,9 @@
+//! Unit tests for byte-range tracking, piece mapping, prebuffer policy,
+//! and `StreamingReader` I/O.
+//!
+//! Tests are purely in-memory or use temporary files — no network access
+//! or torrent client required.
+
 use super::*;
 
 // ── ByteRange ────────────────────────────────────────────────────

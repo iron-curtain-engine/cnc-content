@@ -102,7 +102,7 @@ impl ByteRange {
 /// to know about availability at the file level.
 #[derive(Debug, Clone)]
 pub struct ByteRangeMap {
-    /// Sorted, non-overlapping ranges. Invariant: ranges[i].end <= ranges[i+1].start.
+    /// Sorted, non-overlapping ranges. Invariant: `ranges[i].end <= ranges[i+1].start`.
     ranges: Vec<ByteRange>,
     /// Total file size (used for "is everything available?" checks).
     file_size: u64,
@@ -149,10 +149,12 @@ impl ByteRangeMap {
         if len == 0 {
             return true;
         }
-        let needed = ByteRange {
-            start,
-            end: start + len,
+        // Checked add to prevent overflow with untrusted inputs.
+        let end = match start.checked_add(len) {
+            Some(e) => e,
+            None => return false,
         };
+        let needed = ByteRange { start, end };
         self.ranges.iter().any(|r| r.contains_range(&needed))
     }
 
@@ -496,14 +498,22 @@ impl StreamNotifier {
     /// Typically called from the torrent download thread when a piece
     /// finishes verification and is written to disk.
     pub fn piece_completed(&self, range: ByteRange) {
-        let mut map = self.state.range_map.lock().unwrap();
+        let mut map = self
+            .state
+            .range_map
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         map.insert(range);
         self.state.data_arrived.notify_all();
     }
 
     /// Marks the entire file as complete (all bytes available).
     pub fn mark_complete(&self) {
-        let mut map = self.state.range_map.lock().unwrap();
+        let mut map = self
+            .state
+            .range_map
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let file_size = map.file_size();
         map.insert(ByteRange {
             start: 0,
@@ -601,11 +611,15 @@ impl StreamingReader {
 
     /// Returns current stream progress (for UI display).
     pub fn progress(&self) -> StreamProgress {
-        let map = self.state.range_map.lock().unwrap();
+        let map = self
+            .state
+            .range_map
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let buffered_ahead = map.contiguous_from(self.position);
         let total_available = map.available_bytes();
         let is_buffering = buffered_ahead < self.policy.min_prebuffer
-            && self.position + buffered_ahead < self.file_size;
+            && self.position.saturating_add(buffered_ahead) < self.file_size;
 
         StreamProgress {
             position: self.position,
@@ -619,7 +633,11 @@ impl StreamingReader {
 
     /// Returns `true` if enough data is buffered ahead to start/continue playback.
     pub fn is_playback_ready(&self) -> bool {
-        let map = self.state.range_map.lock().unwrap();
+        let map = self
+            .state
+            .range_map
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let buffered = map.contiguous_from(self.position);
         let remaining = self.file_size - self.position;
         // Ready if: enough buffer OR the rest of the file is available.
@@ -631,7 +649,11 @@ impl StreamingReader {
     /// Call this before the first read to ensure smooth playback start.
     /// Returns `Ok(true)` if ready, `Ok(false)` if timed out.
     pub fn wait_for_prebuffer(&self) -> Result<bool, io::Error> {
-        let map = self.state.range_map.lock().unwrap();
+        let map = self
+            .state
+            .range_map
+            .lock()
+            .map_err(|_| io::Error::other("stream lock poisoned"))?;
 
         let result = self
             .state
@@ -675,7 +697,11 @@ impl StreamingReader {
 
         // Fast path: check if data is already available without waiting.
         {
-            let map = self.state.range_map.lock().unwrap();
+            let map = self
+                .state
+                .range_map
+                .lock()
+                .map_err(|_| io::Error::other("stream lock poisoned"))?;
             if map.has_range(self.position, needed_len as u64) {
                 // Data is available — read directly.
                 drop(map);
@@ -684,7 +710,11 @@ impl StreamingReader {
         }
 
         // Slow path: wait for data to arrive.
-        let map = self.state.range_map.lock().unwrap();
+        let map = self
+            .state
+            .range_map
+            .lock()
+            .map_err(|_| io::Error::other("stream lock poisoned"))?;
         let result = self
             .state
             .data_arrived
@@ -721,7 +751,13 @@ impl StreamingReader {
     /// Reads bytes from the backing file at the current position.
     fn read_from_disk(&mut self, buf: &mut [u8], len: usize) -> io::Result<usize> {
         self.file.seek(SeekFrom::Start(self.position))?;
-        let n = self.file.read(&mut buf[..len])?;
+        // Safety: `len` is bounded by `buf.len()` and `file_size - position`
+        // at every call site, but we guard here to avoid a panic if that
+        // invariant is ever violated.
+        let target = buf
+            .get_mut(..len)
+            .ok_or_else(|| io::Error::other("read buffer slice OOB"))?;
+        let n = self.file.read(target)?;
         self.position += n as u64;
         Ok(n)
     }

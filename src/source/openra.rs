@@ -100,6 +100,8 @@ fn openra_content_paths() -> Vec<PathBuf> {
 mod tests {
     use super::*;
 
+    // ── Probe smoke tests ─────────────────────────────────────────
+
     /// Verifies that `probe()` does not panic when OpenRA is not installed.
     ///
     /// In CI and on machines without OpenRA, the probe should return an
@@ -110,6 +112,8 @@ mod tests {
         // Just assert it returns a Vec without panicking.
         let _ = results;
     }
+
+    // ── Candidate path generation ───────────────────────────────
 
     /// Verifies that `openra_content_paths()` returns platform-specific
     /// candidate paths on every platform.

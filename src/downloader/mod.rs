@@ -48,10 +48,13 @@ pub enum DownloadError {
     AllMirrorsFailed { count: usize, last_error: String },
     #[error("SHA-1 mismatch: expected {expected}, got {actual}")]
     Sha1Mismatch { expected: String, actual: String },
-    #[error("I/O error: {0}")]
-    Io(#[from] io::Error),
-    #[error("ZIP extraction error: {0}")]
-    Zip(String),
+    #[error("I/O error: {source}")]
+    Io {
+        #[from]
+        source: io::Error,
+    },
+    #[error("ZIP extraction error: {detail}")]
+    Zip { detail: String },
 }
 
 /// Progress callback events.
@@ -233,7 +236,7 @@ pub fn download_package(
 /// apply seeding policy.
 ///
 /// The `seeding_policy` controls what happens to the downloaded archive after
-/// extraction. See [`SeedingPolicy`](crate::SeedingPolicy) for details.
+/// extraction. See [`SeedingPolicy`] for details.
 pub fn download_and_install(
     package: &DownloadPackage,
     content_root: &Path,
@@ -356,11 +359,17 @@ pub fn download_missing(
     match game {
         GameId::RedAlert => {
             // QuickInstall covers all three required RA packages in one download.
-            let pkg = crate::download(DownloadId::RaQuickInstall);
+            let pkg =
+                crate::download(DownloadId::RaQuickInstall).ok_or_else(|| DownloadError::Io {
+                    source: io::Error::other("no download definition for RaQuickInstall"),
+                })?;
             download_package(pkg, content_root, on_progress)?;
         }
         GameId::TiberianDawn => {
-            let pkg = crate::download(DownloadId::TdBaseFiles);
+            let pkg =
+                crate::download(DownloadId::TdBaseFiles).ok_or_else(|| DownloadError::Io {
+                    source: io::Error::other("no download definition for TdBaseFiles"),
+                })?;
             download_package(pkg, content_root, on_progress)?;
         }
         // Non-freeware games blocked above by is_freeware() check.
@@ -681,7 +690,7 @@ fn try_download_cancellable(
         .or(if size_hint > 0 { Some(size_hint) } else { None });
 
     if let Some(cl) = content_length {
-        let mut total_guard = best_total.lock().unwrap();
+        let mut total_guard = best_total.lock().unwrap_or_else(|e| e.into_inner());
         if total_guard.is_none() {
             *total_guard = Some(cl);
         }
@@ -807,7 +816,9 @@ fn extract_iso_via_recipes(
             // this download covers. Use the first one that has recipes.
             let mut found = None;
             for &pkg_id in package.provides {
-                let pkg = crate::package(pkg_id);
+                let pkg = crate::package(pkg_id).ok_or_else(|| DownloadError::Io {
+                    source: io::Error::other(format!("no package definition for {pkg_id:?}")),
+                })?;
                 for &src_id in pkg.sources {
                     if crate::recipe(src_id, pkg_id).is_some() {
                         found = Some(src_id);
@@ -838,7 +849,9 @@ fn extract_iso_via_recipes(
                 total: package.provides.len(),
             });
             crate::executor::execute_recipe(recipe, iso_path, content_root, |_| {}).map_err(
-                |e| DownloadError::Zip(format!("recipe execution failed for {:?}: {e}", pkg_id)),
+                |e| DownloadError::Zip {
+                    detail: format!("recipe execution failed for {:?}: {e}", pkg_id),
+                },
             )?;
             files += recipe.actions.len();
         }
@@ -849,12 +862,12 @@ fn extract_iso_via_recipes(
 
 #[cfg(feature = "torrent")]
 fn pkg_id_label(id: crate::PackageId) -> &'static str {
-    crate::package(id).title
+    crate::package(id).map(|p| p.title).unwrap_or("(unknown)")
 }
 
 #[cfg(feature = "torrent")]
 fn source_label(id: crate::SourceId) -> &'static str {
-    crate::source(id).title
+    crate::source(id).map(|s| s.title).unwrap_or("(unknown)")
 }
 
 /// Maximum uncompressed size per ZIP entry (1 GB).
@@ -894,31 +907,38 @@ pub fn extract_zip(
     on_progress: &mut dyn FnMut(DownloadProgress),
 ) -> Result<usize, DownloadError> {
     let file = fs::File::open(zip_path)?;
-    let mut archive = zip::ZipArchive::new(io::BufReader::new(file))
-        .map_err(|e| DownloadError::Zip(e.to_string()))?;
+    let mut archive =
+        zip::ZipArchive::new(io::BufReader::new(file)).map_err(|e| DownloadError::Zip {
+            detail: e.to_string(),
+        })?;
 
     // Reject archives with too many entries (memory exhaustion via central directory).
     if archive.len() > MAX_ZIP_ENTRIES {
-        return Err(DownloadError::Zip(format!(
-            "archive has {} entries (max {})",
-            archive.len(),
-            MAX_ZIP_ENTRIES
-        )));
+        return Err(DownloadError::Zip {
+            detail: format!(
+                "archive has {} entries (max {})",
+                archive.len(),
+                MAX_ZIP_ENTRIES
+            ),
+        });
     }
 
     // PathBoundary ensures ZIP entry names (untrusted, from network) cannot
     // escape content_root via path traversal (Zip Slip — CVE-2018-1000178).
-    let boundary = strict_path::PathBoundary::<()>::try_new_create(content_root)
-        .map_err(|e| DownloadError::Zip(format!("failed to create content boundary: {e}")))?;
+    let boundary = strict_path::PathBoundary::<()>::try_new_create(content_root).map_err(|e| {
+        DownloadError::Zip {
+            detail: format!("failed to create content boundary: {e}"),
+        }
+    })?;
 
     let total = archive.len();
     let mut files = 0;
     let mut total_uncompressed: u64 = 0;
 
     for i in 0..total {
-        let mut entry = archive
-            .by_index(i)
-            .map_err(|e| DownloadError::Zip(e.to_string()))?;
+        let mut entry = archive.by_index(i).map_err(|e| DownloadError::Zip {
+            detail: e.to_string(),
+        })?;
 
         let archive_entry_name = entry.name().to_string();
         if archive_entry_name.ends_with('/') {
@@ -928,19 +948,23 @@ pub fn extract_zip(
         // Archive bomb check: per-entry size limit.
         let declared_size = entry.size();
         if declared_size > MAX_ENTRY_UNCOMPRESSED {
-            return Err(DownloadError::Zip(format!(
-                "entry \"{archive_entry_name}\" declares {declared_size} bytes uncompressed \
-                 (max {MAX_ENTRY_UNCOMPRESSED})"
-            )));
+            return Err(DownloadError::Zip {
+                detail: format!(
+                    "entry \"{archive_entry_name}\" declares {declared_size} bytes uncompressed \
+                     (max {MAX_ENTRY_UNCOMPRESSED})"
+                ),
+            });
         }
 
         // Archive bomb check: total uncompressed size limit.
         total_uncompressed = total_uncompressed.saturating_add(declared_size);
         if total_uncompressed > MAX_TOTAL_UNCOMPRESSED {
-            return Err(DownloadError::Zip(format!(
-                "total uncompressed size exceeds {MAX_TOTAL_UNCOMPRESSED} bytes — \
-                 possible archive bomb"
-            )));
+            return Err(DownloadError::Zip {
+                detail: format!(
+                    "total uncompressed size exceeds {MAX_TOTAL_UNCOMPRESSED} bytes — \
+                     possible archive bomb"
+                ),
+            });
         }
 
         on_progress(DownloadProgress::Extracting {
@@ -950,11 +974,13 @@ pub fn extract_zip(
         });
 
         // Validate the untrusted archive entry name against our boundary.
-        let dest = boundary.strict_join(&archive_entry_name).map_err(|e| {
-            DownloadError::Zip(format!(
-                "blocked path traversal in ZIP entry \"{archive_entry_name}\": {e}"
-            ))
-        })?;
+        let dest = boundary
+            .strict_join(&archive_entry_name)
+            .map_err(|e| DownloadError::Zip {
+                detail: format!(
+                    "blocked path traversal in ZIP entry \"{archive_entry_name}\": {e}"
+                ),
+            })?;
 
         dest.create_parent_dir_all()?;
         let mut out = dest.create_file()?;

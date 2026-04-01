@@ -1,3 +1,9 @@
+//! Unit tests for the InstallShield CAB v5/v6 archive reader.
+//!
+//! Builds synthetic `.hdr`/`.cab` pairs in memory and verifies that
+//! `parse_header` and `extract_file` handle valid archives, corrupt
+//! inputs, and edge cases (empty files, zlib-compressed data) correctly.
+
 use super::*;
 
 // ── Helper: build a minimal synthetic v5 InstallShield archive ───
@@ -251,7 +257,7 @@ fn extract_nonexistent_file_errors() {
 
     let vol_refs: Vec<(u32, &Path)> = vol_paths.iter().map(|(i, p)| (*i, p.as_path())).collect();
     let result = archive.extract("NONEXISTENT.MIX", &vol_refs);
-    assert!(matches!(result, Err(IscabError::FileNotFound(_))));
+    assert!(matches!(result, Err(IscabError::FileNotFound { .. })));
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
@@ -380,8 +386,8 @@ fn extract_missing_volume_errors() {
     let volumes: Vec<(u32, &Path)> = vec![(1, cab_path.as_path())];
     let result = archive.extract("test_file", &volumes);
     assert!(
-        matches!(result, Err(IscabError::MissingVolume(2))),
-        "expected MissingVolume(2), got {result:?}"
+        matches!(result, Err(IscabError::MissingVolume { volume: 2 })),
+        "expected MissingVolume {{ volume: 2 }}, got {result:?}"
     );
 
     let _ = std::fs::remove_dir_all(&tmp);
@@ -416,7 +422,9 @@ fn iscab_error_display_bad_signature() {
 /// inspecting the error variant programmatically.
 #[test]
 fn iscab_error_display_file_not_found() {
-    let err = IscabError::FileNotFound("missing.dat".to_string());
+    let err = IscabError::FileNotFound {
+        name: "missing.dat".to_string(),
+    };
     let msg = err.to_string();
     assert!(
         msg.contains("missing.dat"),
@@ -443,7 +451,7 @@ fn iscab_error_display_unsupported_version() {
 /// supplied.
 #[test]
 fn iscab_error_display_missing_volume() {
-    let err = IscabError::MissingVolume(3);
+    let err = IscabError::MissingVolume { volume: 3 };
     let msg = err.to_string();
     assert!(
         msg.contains("3"),

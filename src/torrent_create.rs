@@ -29,10 +29,13 @@ pub const DEFAULT_PIECE_LENGTH: u64 = 256 * 1024;
 /// Errors from torrent creation.
 #[derive(Debug, Error)]
 pub enum TorrentCreateError {
-    #[error("I/O error: {0}")]
-    Io(#[from] io::Error),
-    #[error("file is empty: {0}")]
-    EmptyFile(String),
+    #[error("I/O error: {source}")]
+    Io {
+        #[from]
+        source: io::Error,
+    },
+    #[error("file is empty: {path}")]
+    EmptyFile { path: String },
 }
 
 /// Result of creating a torrent: the bencoded `.torrent` file and its info hash.
@@ -67,9 +70,9 @@ pub fn create_torrent(
     let metadata = std::fs::metadata(file_path)?;
     let file_size = metadata.len();
     if file_size == 0 {
-        return Err(TorrentCreateError::EmptyFile(
-            file_path.display().to_string(),
-        ));
+        return Err(TorrentCreateError::EmptyFile {
+            path: file_path.display().to_string(),
+        });
     }
 
     // ── Hash pieces ─────────────────────────────────────────────────
@@ -310,7 +313,7 @@ mod tests {
         std::fs::write(&file_path, b"").unwrap();
 
         let result = create_torrent(&file_path, DEFAULT_PIECE_LENGTH, &[]);
-        assert!(matches!(result, Err(TorrentCreateError::EmptyFile(_))));
+        assert!(matches!(result, Err(TorrentCreateError::EmptyFile { .. })));
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -336,7 +339,9 @@ mod tests {
     /// Error Display for EmptyFile includes the path.
     #[test]
     fn torrent_create_error_display_empty_file() {
-        let err = TorrentCreateError::EmptyFile("test.zip".into());
+        let err = TorrentCreateError::EmptyFile {
+            path: "test.zip".into(),
+        };
         let msg = err.to_string();
         assert!(msg.contains("test.zip"), "should contain path: {msg}");
     }

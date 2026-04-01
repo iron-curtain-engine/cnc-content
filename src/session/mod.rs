@@ -34,16 +34,22 @@ use crate::{GameId, PackageId, SeedingPolicy};
 /// Errors from session operations.
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
-    #[error("download error: {0}")]
-    Download(#[from] crate::downloader::DownloadError),
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("{0} is not freeware — cannot download")]
-    NotFreeware(String),
-    #[error("torrent session error: {0}")]
-    Torrent(String),
-    #[error("path traversal rejected: {0}")]
-    PathTraversal(String),
+    #[error("download error: {source}")]
+    Download {
+        #[from]
+        source: crate::downloader::DownloadError,
+    },
+    #[error("I/O error: {source}")]
+    Io {
+        #[from]
+        source: std::io::Error,
+    },
+    #[error("{game} is not freeware — cannot download")]
+    NotFreeware { game: String },
+    #[error("torrent session error: {message}")]
+    Torrent { message: String },
+    #[error("path traversal rejected: {detail}")]
+    PathTraversal { detail: String },
 }
 
 /// High-level content session — the main entry point for downstream crates.
@@ -155,11 +161,15 @@ impl ContentSession {
         mut on_progress: impl FnMut(crate::downloader::DownloadProgress),
     ) -> Result<(), SessionError> {
         if !self.game.is_freeware() {
-            return Err(SessionError::NotFreeware(self.game.title().to_string()));
+            return Err(SessionError::NotFreeware {
+                game: self.game.title().to_string(),
+            });
         }
 
         for &pkg_id in packages {
-            let pkg = crate::package(pkg_id);
+            let pkg = crate::package(pkg_id).ok_or_else(|| SessionError::Io {
+                source: std::io::Error::other(format!("no package definition for {pkg_id:?}")),
+            })?;
 
             // Skip if already installed.
             if pkg
@@ -172,7 +182,9 @@ impl ContentSession {
 
             // Find a download that provides this package.
             let download = match pkg.download {
-                Some(dl_id) => crate::download(dl_id),
+                Some(dl_id) => crate::download(dl_id).ok_or_else(|| SessionError::Io {
+                    source: std::io::Error::other(format!("no download definition for {dl_id:?}")),
+                })?,
                 None => continue, // no download available
             };
 
@@ -224,11 +236,17 @@ impl ContentSession {
     /// playback (FMV cutscenes) directly from the P2P swarm without waiting for
     /// the full download to complete.
     pub fn content_file_path(&self, relative_path: &str) -> Result<Option<PathBuf>, SessionError> {
-        let boundary = PathBoundary::<()>::try_new_create(&self.content_root)
-            .map_err(|e| SessionError::PathTraversal(e.to_string()))?;
-        let strict = boundary
-            .strict_join(relative_path)
-            .map_err(|e| SessionError::PathTraversal(e.to_string()))?;
+        let boundary = PathBoundary::<()>::try_new_create(&self.content_root).map_err(|e| {
+            SessionError::PathTraversal {
+                detail: e.to_string(),
+            }
+        })?;
+        let strict =
+            boundary
+                .strict_join(relative_path)
+                .map_err(|e| SessionError::PathTraversal {
+                    detail: e.to_string(),
+                })?;
         let full = strict.unstrict();
         if full.exists() {
             Ok(Some(full))
@@ -270,11 +288,17 @@ impl ContentSession {
     /// let _ = std::fs::remove_dir_all(&tmp);
     /// ```
     pub fn open_content(&self, relative_path: &str) -> Result<ContentReader, SessionError> {
-        let boundary = PathBoundary::<()>::try_new_create(&self.content_root)
-            .map_err(|e| SessionError::PathTraversal(e.to_string()))?;
-        let strict = boundary
-            .strict_join(relative_path)
-            .map_err(|e| SessionError::PathTraversal(e.to_string()))?;
+        let boundary = PathBoundary::<()>::try_new_create(&self.content_root).map_err(|e| {
+            SessionError::PathTraversal {
+                detail: e.to_string(),
+            }
+        })?;
+        let strict =
+            boundary
+                .strict_join(relative_path)
+                .map_err(|e| SessionError::PathTraversal {
+                    detail: e.to_string(),
+                })?;
         let full = strict.unstrict();
         let file = std::fs::File::open(&full)?;
         let size = file.metadata()?.len();
@@ -319,11 +343,17 @@ impl ContentSession {
         &self,
         relative_path: &str,
     ) -> Result<crate::streaming::StreamingReader, SessionError> {
-        let boundary = PathBoundary::<()>::try_new_create(&self.content_root)
-            .map_err(|e| SessionError::PathTraversal(e.to_string()))?;
-        let strict = boundary
-            .strict_join(relative_path)
-            .map_err(|e| SessionError::PathTraversal(e.to_string()))?;
+        let boundary = PathBoundary::<()>::try_new_create(&self.content_root).map_err(|e| {
+            SessionError::PathTraversal {
+                detail: e.to_string(),
+            }
+        })?;
+        let strict =
+            boundary
+                .strict_join(relative_path)
+                .map_err(|e| SessionError::PathTraversal {
+                    detail: e.to_string(),
+                })?;
         let full = strict.unstrict();
         Ok(crate::streaming::StreamingReader::from_complete_file(
             &full,
@@ -340,11 +370,17 @@ impl ContentSession {
         relative_path: &str,
         policy: crate::streaming::BufferPolicy,
     ) -> Result<crate::streaming::StreamingReader, SessionError> {
-        let boundary = PathBoundary::<()>::try_new_create(&self.content_root)
-            .map_err(|e| SessionError::PathTraversal(e.to_string()))?;
-        let strict = boundary
-            .strict_join(relative_path)
-            .map_err(|e| SessionError::PathTraversal(e.to_string()))?;
+        let boundary = PathBoundary::<()>::try_new_create(&self.content_root).map_err(|e| {
+            SessionError::PathTraversal {
+                detail: e.to_string(),
+            }
+        })?;
+        let strict =
+            boundary
+                .strict_join(relative_path)
+                .map_err(|e| SessionError::PathTraversal {
+                    detail: e.to_string(),
+                })?;
         let full = strict.unstrict();
         let file_size = std::fs::metadata(&full)?.len();
         let range_map = crate::streaming::ByteRangeMap::fully_available(file_size);

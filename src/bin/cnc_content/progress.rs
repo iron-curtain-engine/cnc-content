@@ -217,13 +217,15 @@ impl ProgressDisplay {
             let tick_strings: Vec<&str> = SPINNER_FRAMES.to_vec();
             bar.set_style(
                 ProgressStyle::with_template(SPINNER_STYLE)
-                    .expect("valid spinner template")
+                    .unwrap_or_else(|_| ProgressStyle::default_spinner())
                     .tick_strings(&tick_strings),
             );
             bar.enable_steady_tick(std::time::Duration::from_millis(80));
             self.bar = Some(bar);
         }
-        self.bar.as_ref().expect("just created")
+        // get_or_insert_with is a panic-free accessor — the closure is never
+        // called because the if-block above ensures bar is Some.
+        self.bar.get_or_insert_with(ProgressBar::new_spinner)
     }
 
     /// Creates a download progress bar with byte tracking.
@@ -232,7 +234,7 @@ impl ProgressDisplay {
             let pb = ProgressBar::new(total);
             pb.set_style(
                 ProgressStyle::with_template(DOWNLOAD_STYLE)
-                    .expect("valid download template")
+                    .unwrap_or_else(|_| ProgressStyle::default_bar())
                     .progress_chars(BAR_CHARS),
             );
             pb
@@ -240,14 +242,15 @@ impl ProgressDisplay {
             let pb = ProgressBar::new_spinner();
             pb.set_style(
                 ProgressStyle::with_template(DOWNLOAD_UNKNOWN_STYLE)
-                    .expect("valid unknown-size template")
+                    .unwrap_or_else(|_| ProgressStyle::default_spinner())
                     .progress_chars(BAR_CHARS),
             );
             pb.enable_steady_tick(std::time::Duration::from_millis(100));
             pb
         };
         self.bar = Some(bar);
-        self.bar.as_ref().expect("just created")
+        // Panic-free accessor — bar was just set above.
+        self.bar.get_or_insert_with(|| ProgressBar::new(0))
     }
 
     /// Creates an extraction progress bar with file count tracking.
@@ -255,11 +258,12 @@ impl ProgressDisplay {
         let bar = ProgressBar::new(total as u64);
         bar.set_style(
             ProgressStyle::with_template(EXTRACT_STYLE)
-                .expect("valid extract template")
+                .unwrap_or_else(|_| ProgressStyle::default_bar())
                 .progress_chars(BAR_CHARS),
         );
         self.bar = Some(bar);
-        self.bar.as_ref().expect("just created")
+        // Panic-free accessor — bar was just set above.
+        self.bar.get_or_insert_with(|| ProgressBar::new(0))
     }
 }
 

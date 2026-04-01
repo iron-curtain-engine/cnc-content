@@ -1,3 +1,8 @@
+//! Unit tests for source identification and installed-content verification.
+//!
+//! Covers SHA-1 source ID checks, SHA-256 manifest generation and
+//! verification, hex encoding, and adversarial inputs.
+
 use super::*;
 use std::collections::BTreeMap;
 
@@ -444,7 +449,9 @@ fn verify_error_display_sha1_mismatch() {
 /// the problem, so it must appear verbatim in the error message.
 #[test]
 fn verify_error_display_file_not_found() {
-    let err = VerifyError::FileNotFound("gone.mix".into());
+    let err = VerifyError::FileNotFound {
+        path: "gone.mix".into(),
+    };
     let msg = err.to_string();
     assert!(msg.contains("gone.mix"), "missing path in: {msg}");
 }

@@ -17,27 +17,18 @@ use crate::{
 // ── ID lookups ────────────────────────────────────────────────────────────
 
 /// Lookup a content package definition by ID.
-pub fn package(id: PackageId) -> &'static ContentPackage {
-    packages::ALL_PACKAGES
-        .iter()
-        .find(|p| p.id == id)
-        .expect("every PackageId must have a corresponding definition")
+pub fn package(id: PackageId) -> Option<&'static ContentPackage> {
+    packages::ALL_PACKAGES.iter().find(|p| p.id == id)
 }
 
 /// Lookup a content source definition by ID.
-pub fn source(id: SourceId) -> &'static ContentSource {
-    sources::ALL_SOURCES
-        .iter()
-        .find(|s| s.id == id)
-        .expect("every SourceId must have a corresponding definition")
+pub fn source(id: SourceId) -> Option<&'static ContentSource> {
+    sources::ALL_SOURCES.iter().find(|s| s.id == id)
 }
 
 /// Lookup an HTTP download definition by ID.
-pub fn download(id: DownloadId) -> &'static DownloadPackage {
-    downloads::ALL_DOWNLOADS
-        .iter()
-        .find(|d| d.id == id)
-        .expect("every DownloadId must have a corresponding definition")
+pub fn download(id: DownloadId) -> Option<&'static DownloadPackage> {
+    downloads::ALL_DOWNLOADS.iter().find(|d| d.id == id)
 }
 
 /// Lookup an install recipe for a source/package combination.

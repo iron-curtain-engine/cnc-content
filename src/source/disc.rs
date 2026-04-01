@@ -113,6 +113,8 @@ fn disc_mount_points() -> Vec<PathBuf> {
 mod tests {
     use super::*;
 
+    // ── Probe smoke tests ─────────────────────────────────────────
+
     /// Verifies that `probe()` does not panic when no disc volumes are mounted.
     ///
     /// In CI there are no C&C discs mounted, so the probe should return

@@ -69,16 +69,19 @@ pub struct FileDigest {
 /// Errors from verification operations.
 #[derive(Debug, Error)]
 pub enum VerifyError {
-    #[error("I/O error: {0}")]
-    Io(#[from] io::Error),
+    #[error("I/O error: {source}")]
+    Io {
+        #[from]
+        source: io::Error,
+    },
     #[error("SHA-1 mismatch for {path}: expected {expected}, got {actual}")]
     Sha1Mismatch {
         path: String,
         expected: String,
         actual: String,
     },
-    #[error("file not found: {0}")]
-    FileNotFound(String),
+    #[error("file not found: {path}")]
+    FileNotFound { path: String },
 }
 
 /// Checks whether a source root matches a known source by verifying its ID files.
@@ -234,7 +237,12 @@ impl Sha256Scratch {
             if n == 0 {
                 break;
             }
-            self.hasher.update(&self.buffer[..n]);
+            // `n` is bounded by `self.buffer.len()` since `file.read` was
+            // given a `&mut self.buffer` slice — the `.get()` guards against
+            // any future refactoring that changes the buffer reference.
+            if let Some(slice) = self.buffer.get(..n) {
+                self.hasher.update(slice);
+            }
         }
 
         Ok(hex_encode(self.hasher.finalize_reset().as_slice()))
@@ -318,7 +326,8 @@ pub fn generate_manifest(
     // Collect all file paths first.
     let mut paths: Vec<(&str, std::path::PathBuf)> = Vec::new();
     for pkg_id in packages {
-        let pkg = crate::package(*pkg_id);
+        let pkg = crate::package(*pkg_id)
+            .ok_or_else(|| io::Error::other(format!("no package definition for {pkg_id:?}")))?;
         for test_file in pkg.test_files {
             let full = content_root.join(test_file);
             if full.exists() {
@@ -425,28 +434,47 @@ impl VerifyBitfield {
     }
 
     /// Marks a file index as set (verified/passed).
+    ///
+    /// Out-of-bounds indices are silently ignored (defensive guard).
     pub fn set(&mut self, index: usize) {
-        debug_assert!(index < self.len);
+        if index >= self.len {
+            return;
+        }
         let lane = index / 256;
         let bit_in_lane = index % 256;
         let word = bit_in_lane / 64;
         let bit = bit_in_lane % 64;
 
-        let mut arr = self.lanes[lane].to_array();
-        arr[word] |= 1u64 << bit;
-        self.lanes[lane] = wide::u64x4::from(arr);
+        let Some(lane_ref) = self.lanes.get(lane) else {
+            return;
+        };
+        let mut arr = lane_ref.to_array();
+        let Some(w) = arr.get_mut(word) else {
+            return;
+        };
+        *w |= 1u64 << bit;
+        if let Some(slot) = self.lanes.get_mut(lane) {
+            *slot = wide::u64x4::from(arr);
+        }
     }
 
     /// Returns `true` if the given file index is set.
+    ///
+    /// Returns `false` for out-of-bounds indices (defensive guard).
     pub fn get(&self, index: usize) -> bool {
-        debug_assert!(index < self.len);
+        if index >= self.len {
+            return false;
+        }
         let lane = index / 256;
         let bit_in_lane = index % 256;
         let word = bit_in_lane / 64;
         let bit = bit_in_lane % 64;
 
-        let arr = self.lanes[lane].to_array();
-        arr[word] & (1u64 << bit) != 0
+        let Some(lane_ref) = self.lanes.get(lane) else {
+            return false;
+        };
+        let arr = lane_ref.to_array();
+        arr.get(word).is_some_and(|w| w & (1u64 << bit) != 0)
     }
 
     /// Returns the number of set bits (files that passed verification).
@@ -481,8 +509,12 @@ impl VerifyBitfield {
     /// Useful for "which files are both installed AND verified?"
     pub fn and(&self, other: &Self) -> Self {
         let mut result = Self::new(self.len.max(other.len));
-        for i in 0..16 {
-            result.lanes[i] = self.lanes[i] & other.lanes[i];
+        for (r, (a, b)) in result
+            .lanes
+            .iter_mut()
+            .zip(self.lanes.iter().zip(other.lanes.iter()))
+        {
+            *r = *a & *b;
         }
         result
     }
@@ -493,8 +525,12 @@ impl VerifyBitfield {
     /// Useful for "which files have been checked at all?"
     pub fn or(&self, other: &Self) -> Self {
         let mut result = Self::new(self.len.max(other.len));
-        for i in 0..16 {
-            result.lanes[i] = self.lanes[i] | other.lanes[i];
+        for (r, (a, b)) in result
+            .lanes
+            .iter_mut()
+            .zip(self.lanes.iter().zip(other.lanes.iter()))
+        {
+            *r = *a | *b;
         }
         result
     }
@@ -504,8 +540,12 @@ impl VerifyBitfield {
     /// Useful for "which files still need checking?" (all AND NOT checked).
     pub fn and_not(&self, other: &Self) -> Self {
         let mut result = Self::new(self.len.max(other.len));
-        for i in 0..16 {
-            result.lanes[i] = self.lanes[i] & !other.lanes[i];
+        for (r, (a, b)) in result
+            .lanes
+            .iter_mut()
+            .zip(self.lanes.iter().zip(other.lanes.iter()))
+        {
+            *r = *a & !*b;
         }
         result
     }

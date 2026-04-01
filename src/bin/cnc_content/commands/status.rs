@@ -236,7 +236,13 @@ pub fn cmd_detect() {
 
     println!("Found {} source(s):\n", detected.len());
     for (i, src) in detected.iter().enumerate() {
-        let source_def = cnc_content::source(src.source_id);
+        let source_def = cnc_content::source(src.source_id).unwrap_or_else(|| {
+            eprintln!(
+                "Internal error: no source definition for {:?}",
+                src.source_id
+            );
+            std::process::exit(1);
+        });
         println!(
             "  {}. {} ({:?})",
             i + 1,
@@ -246,7 +252,10 @@ pub fn cmd_detect() {
         println!("     Path: {}", src.path.display());
         println!("     Provides {} package(s):", src.packages.len());
         for pkg_id in &src.packages {
-            let pkg = cnc_content::package(*pkg_id);
+            let pkg = cnc_content::package(*pkg_id).unwrap_or_else(|| {
+                eprintln!("Internal error: no package definition for {pkg_id:?}");
+                std::process::exit(1);
+            });
             let req = if pkg.required { " (required)" } else { "" };
             println!("       - {}{req}", pkg.title);
         }
@@ -268,7 +277,10 @@ pub fn cmd_identify(path: &std::path::Path) {
 
     match cnc_content::verify::identify_source(path) {
         Some(source_id) => {
-            let src = cnc_content::source(source_id);
+            let src = cnc_content::source(source_id).unwrap_or_else(|| {
+                eprintln!("Internal error: no source definition for {source_id:?}");
+                std::process::exit(1);
+            });
             println!("Identified: {} ({:?})", src.title, src.source_type);
 
             // Show which packages this source provides.

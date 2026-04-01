@@ -30,17 +30,19 @@
 //!
 //! ## Library usage
 //!
-//! ```rust,no_run
-//! use cnc_content::{GameId, packages, sources, downloads, verify};
+//! ```rust
+//! use cnc_content::GameId;
 //!
-//! // Check if Red Alert content is complete
-//! let root = std::path::Path::new("~/.iron-curtain/content/ra/v1");
-//! if !cnc_content::is_content_complete(root, GameId::RedAlert) {
-//!     let missing = cnc_content::missing_required_packages(root, GameId::RedAlert);
+//! // Check if Red Alert content is complete (uses a temp dir for the example)
+//! let root = std::env::temp_dir().join("cnc-content-doctest-lib");
+//! let _ = std::fs::create_dir_all(&root);
+//! if !cnc_content::is_content_complete(&root, GameId::RedAlert) {
+//!     let missing = cnc_content::missing_required_packages(&root, GameId::RedAlert);
 //!     for pkg in missing {
 //!         eprintln!("missing: {}", pkg.title);
 //!     }
 //! }
+//! let _ = std::fs::remove_dir_all(&root);
 //! ```
 
 pub mod actions;

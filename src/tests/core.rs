@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025–present Iron Curtain contributors
 
+//! Integration tests for `GameId`, package definitions, and source invariants.
+//!
+//! Verifies that every enum variant has a matching table entry, slugs round-trip,
+//! and required-package counts are sane across all four supported games.
+
 use super::super::*;
 
 // ── GameId tests ────────────────────────────────────────────────────
@@ -57,7 +62,7 @@ fn all_ra_package_ids_have_definitions() {
         PackageId::RaMusicAftermath,
     ];
     for id in ids {
-        let pkg = package(id);
+        let pkg = package(id).unwrap();
         assert_eq!(pkg.id, id);
         assert_eq!(pkg.game, GameId::RedAlert);
         assert!(!pkg.title.is_empty());
@@ -83,7 +88,7 @@ fn all_td_package_ids_have_definitions() {
         PackageId::TdMoviesNod,
     ];
     for id in ids {
-        let pkg = package(id);
+        let pkg = package(id).unwrap();
         assert_eq!(pkg.id, id);
         assert_eq!(pkg.game, GameId::TiberianDawn);
         assert!(!pkg.title.is_empty());
@@ -100,7 +105,7 @@ fn all_td_package_ids_have_definitions() {
 /// silently skipping it.
 #[test]
 fn dune2_package_has_definition() {
-    let pkg = package(PackageId::Dune2Base);
+    let pkg = package(PackageId::Dune2Base).unwrap();
     assert_eq!(pkg.game, GameId::Dune2);
     assert!(pkg.required);
     assert!(!pkg.test_files.is_empty());
@@ -114,7 +119,7 @@ fn dune2_package_has_definition() {
 /// the same invariant as the Dune 2 package check.
 #[test]
 fn dune2000_package_has_definition() {
-    let pkg = package(PackageId::Dune2000Base);
+    let pkg = package(PackageId::Dune2000Base).unwrap();
     assert_eq!(pkg.game, GameId::Dune2000);
     assert!(pkg.required);
     assert!(!pkg.test_files.is_empty());
@@ -158,7 +163,7 @@ fn all_source_ids_have_definitions() {
         SourceId::GogDune2000,
     ];
     for id in ids {
-        let src = source(id);
+        let src = source(id).unwrap();
         assert_eq!(src.id, id);
         assert!(!src.title.is_empty());
         assert!(!src.id_files.is_empty());

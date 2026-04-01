@@ -1,3 +1,8 @@
+//! Unit tests for `ContentSession` — the high-level content lifecycle API.
+//!
+//! Exercises session creation, content-root management, package installation
+//! checks, and seeding policy persistence using temporary directories.
+
 use super::*;
 
 /// Helper: create a temporary content root with some test files.
@@ -79,9 +84,11 @@ fn content_file_path_rejects_windows_absolute_path() {
 
 /// `content_file_path` must reject backslash-encoded traversal sequences.
 ///
-/// On Windows, `..\\` is a valid parent-traversal separator; on Unix it may be
-/// treated as a literal filename component or normalized away. Either way the
-/// security boundary must hold: the resolved path must remain inside the content root.
+/// On Windows, `..\\` is a path separator and this is genuine traversal
+/// that `strict-path` correctly rejects. On Unix, backslashes are literal
+/// filename characters — `..\\..\\` is a single valid component, not
+/// traversal. This test only applies to Windows.
+#[cfg(target_os = "windows")]
 #[test]
 fn content_file_path_rejects_backslash_traversal() {
     let (tmp, session) = setup_content_dir("traversal-backslash");
@@ -359,7 +366,9 @@ fn session_shutdown_does_not_panic() {
 /// message so the user (or log analysis) can identify the attempted traversal.
 #[test]
 fn session_error_display_path_traversal() {
-    let err = SessionError::PathTraversal("../../../etc/passwd".into());
+    let err = SessionError::PathTraversal {
+        detail: "../../../etc/passwd".into(),
+    };
     let msg = err.to_string();
     assert!(msg.contains("../../../etc/passwd"));
 }
@@ -371,7 +380,9 @@ fn session_error_display_path_traversal() {
 /// restriction, and must mention "freeware" so the reason is clear.
 #[test]
 fn session_error_display_not_freeware() {
-    let err = SessionError::NotFreeware("Dune 2".into());
+    let err = SessionError::NotFreeware {
+        game: "Dune 2".into(),
+    };
     let msg = err.to_string();
     assert!(msg.contains("Dune 2"));
     assert!(msg.contains("freeware"));

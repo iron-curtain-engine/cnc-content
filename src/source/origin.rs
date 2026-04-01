@@ -6,14 +6,26 @@
 //! On Windows, reads registry keys to find install directories. On other
 //! platforms, checks common filesystem locations.
 
+use super::DetectedSource;
+#[cfg(target_os = "windows")]
 use std::path::PathBuf;
 
-use super::{packages_for_source, DetectedSource};
-use crate::sources::ALL_SOURCES;
-use crate::{PlatformHint, SourceType};
+/// Probes for Origin / EA App installs of C&C games.
+///
+/// Origin/EA App installs are Windows-only, so this always returns empty
+/// on other platforms.
+#[cfg(not(target_os = "windows"))]
+pub fn probe() -> Vec<DetectedSource> {
+    Vec::new()
+}
 
 /// Probes for Origin / EA App installs of C&C games.
+#[cfg(target_os = "windows")]
 pub fn probe() -> Vec<DetectedSource> {
+    use super::packages_for_source;
+    use crate::sources::ALL_SOURCES;
+    use crate::SourceType;
+
     let mut results = Vec::new();
 
     for source in ALL_SOURCES
@@ -40,15 +52,15 @@ pub fn probe() -> Vec<DetectedSource> {
 }
 
 /// Attempts to find an Origin install path for a given source.
+#[cfg(target_os = "windows")]
 fn find_origin_install(source: &crate::ContentSource) -> Option<PathBuf> {
-    // Try registry on Windows.
-    #[cfg(target_os = "windows")]
-    {
-        if let Some(PlatformHint::RegistryKey { key, value }) = source.platform_hint {
-            if let Some(path) = read_registry_install_dir(key, value) {
-                if path.is_dir() {
-                    return Some(path);
-                }
+    use crate::PlatformHint;
+
+    // Try registry first.
+    if let Some(PlatformHint::RegistryKey { key, value }) = source.platform_hint {
+        if let Some(path) = read_registry_install_dir(key, value) {
+            if path.is_dir() {
+                return Some(path);
             }
         }
     }
@@ -85,42 +97,41 @@ fn read_registry_install_dir(key_path: &str, value_name: &str) -> Option<PathBuf
 }
 
 /// Returns common EA App install directory candidates for a source.
+#[cfg(target_os = "windows")]
 fn ea_app_candidates(source: &crate::ContentSource) -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
-    #[cfg(target_os = "windows")]
-    {
-        if let Ok(pf86) = std::env::var("ProgramFiles(x86)") {
-            let ea_base = PathBuf::from(&pf86).join("Origin Games");
-            match source.id {
-                crate::SourceId::OriginTuc => {
-                    paths.push(ea_base.join("Command and Conquer Red Alert"));
-                    let ea_app = PathBuf::from(&pf86).join("EA Games");
-                    paths.push(ea_app.join("Command and Conquer Red Alert"));
-                }
-                crate::SourceId::OriginCnc => {
-                    paths.push(ea_base.join("Command and Conquer"));
-                    let ea_app = PathBuf::from(&pf86).join("EA Games");
-                    paths.push(ea_app.join("CNC and The Covert Operations"));
-                }
-                crate::SourceId::OriginRemastered => {
-                    paths.push(ea_base.join("CnCRemastered"));
-                    // EA App installs to a different path.
-                    let ea_app_base = PathBuf::from(&pf86).join("Electronic Arts/EA Games");
-                    paths.push(ea_app_base.join("CnCRemastered"));
-                }
-                _ => {}
+    if let Ok(pf86) = std::env::var("ProgramFiles(x86)") {
+        let ea_base = PathBuf::from(&pf86).join("Origin Games");
+        match source.id {
+            crate::SourceId::OriginTuc => {
+                paths.push(ea_base.join("Command and Conquer Red Alert"));
+                let ea_app = PathBuf::from(&pf86).join("EA Games");
+                paths.push(ea_app.join("Command and Conquer Red Alert"));
             }
+            crate::SourceId::OriginCnc => {
+                paths.push(ea_base.join("Command and Conquer"));
+                let ea_app = PathBuf::from(&pf86).join("EA Games");
+                paths.push(ea_app.join("CNC and The Covert Operations"));
+            }
+            crate::SourceId::OriginRemastered => {
+                paths.push(ea_base.join("CnCRemastered"));
+                // EA App installs to a different path.
+                let ea_app_base = PathBuf::from(&pf86).join("Electronic Arts/EA Games");
+                paths.push(ea_app_base.join("CnCRemastered"));
+            }
+            _ => {}
         }
     }
 
-    let _ = source; // suppress unused warning on non-Windows
     paths
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Probe smoke tests ─────────────────────────────────────────
 
     /// Verifies that `probe()` does not panic when Origin/EA App is not installed.
     ///
