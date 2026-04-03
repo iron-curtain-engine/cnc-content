@@ -194,6 +194,45 @@ pub fn execute_recipe(
                     fs::remove_file(target.interop_path())?;
                 }
             }
+
+            InstallAction::ExtractBig {
+                source_big,
+                entries,
+            } => {
+                let big = bounded_path(&source, source_big)?;
+                let (written, bytes) =
+                    extract_from_big(&big, &content, entries, source_big, &mut on_progress)?;
+                files_written += written;
+                total_bytes += bytes;
+            }
+
+            InstallAction::ExtractMeg {
+                source_meg,
+                entries,
+            } => {
+                let meg = bounded_path(&source, source_meg)?;
+                let (written, bytes) =
+                    extract_from_meg(&meg, &content, entries, source_meg, &mut on_progress)?;
+                files_written += written;
+                total_bytes += bytes;
+            }
+
+            InstallAction::ExtractBagIdx {
+                source_idx,
+                source_bag,
+                entries,
+            } => {
+                let (written, bytes) = extract_from_bag_idx(
+                    &source,
+                    &content,
+                    source_idx,
+                    source_bag,
+                    entries,
+                    &mut on_progress,
+                )?;
+                files_written += written;
+                total_bytes += bytes;
+            }
         }
     }
 
@@ -441,6 +480,161 @@ fn extract_zip_entry(
     Ok(None)
 }
 
+/// Extracts entries from a BIG archive (C&C Generals / Zero Hour).
+///
+/// Uses `cnc_formats::big::BigArchiveReader` for streaming reads. Entry
+/// lookups are case-insensitive to handle Windows-style path conventions
+/// in BIG archives.
+fn extract_from_big(
+    big_path: &StrictPath,
+    content: &PathBoundary<()>,
+    entries: &[FileMapping],
+    archive_name: &str,
+    on_progress: &mut impl FnMut(InstallProgress),
+) -> Result<(usize, u64), ExecutorError> {
+    if !big_path.exists() {
+        return Err(ExecutorError::SourceFileNotFound {
+            path: big_path.clone().unstrict(),
+        });
+    }
+
+    let file = big_path.open_file()?;
+    let reader = io::BufReader::new(file);
+    let mut archive = cnc_formats::big::BigArchiveReader::open(reader)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+    let mut files_written = 0;
+    let mut total_bytes: u64 = 0;
+
+    for mapping in entries {
+        let data = archive
+            .read(mapping.from)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+        let data = data.ok_or_else(|| ExecutorError::ZipError {
+            detail: format!("BIG entry '{}' not found in {}", mapping.from, archive_name),
+        })?;
+
+        let dst = bounded_path(content, mapping.to)?;
+        dst.create_parent_dir_all()?;
+        dst.write(&data)?;
+
+        let bytes = data.len() as u64;
+        on_progress(InstallProgress::FileWritten {
+            path: dst.unstrict(),
+            bytes,
+        });
+        files_written += 1;
+        total_bytes += bytes;
+    }
+
+    Ok((files_written, total_bytes))
+}
+
+/// Extracts entries from a MEG archive (C&C Remastered / Petroglyph).
+///
+/// Uses `cnc_formats::meg::MegArchiveReader` for streaming reads. Entry
+/// lookups are case-insensitive.
+fn extract_from_meg(
+    meg_path: &StrictPath,
+    content: &PathBoundary<()>,
+    entries: &[FileMapping],
+    archive_name: &str,
+    on_progress: &mut impl FnMut(InstallProgress),
+) -> Result<(usize, u64), ExecutorError> {
+    if !meg_path.exists() {
+        return Err(ExecutorError::SourceFileNotFound {
+            path: meg_path.clone().unstrict(),
+        });
+    }
+
+    let file = meg_path.open_file()?;
+    let reader = io::BufReader::new(file);
+    let mut archive = cnc_formats::meg::MegArchiveReader::open(reader)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+    let mut files_written = 0;
+    let mut total_bytes: u64 = 0;
+
+    for mapping in entries {
+        let data = archive
+            .read(mapping.from)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+        let data = data.ok_or_else(|| ExecutorError::ZipError {
+            detail: format!("MEG entry '{}' not found in {}", mapping.from, archive_name),
+        })?;
+
+        let dst = bounded_path(content, mapping.to)?;
+        dst.create_parent_dir_all()?;
+        dst.write(&data)?;
+
+        let bytes = data.len() as u64;
+        on_progress(InstallProgress::FileWritten {
+            path: dst.unstrict(),
+            bytes,
+        });
+        files_written += 1;
+        total_bytes += bytes;
+    }
+
+    Ok((files_written, total_bytes))
+}
+
+/// Extracts audio entries from a BAG/IDX pair (Red Alert 2 / Yuri's Revenge).
+///
+/// Parses the small .idx index file to locate entries, then reads data from
+/// the .bag file at the specified offsets. This avoids loading the entire
+/// .bag file (which can be hundreds of MB) into memory.
+fn extract_from_bag_idx(
+    source: &PathBoundary<()>,
+    content: &PathBoundary<()>,
+    idx_path: &str,
+    bag_path: &str,
+    entries: &[FileMapping],
+    on_progress: &mut impl FnMut(InstallProgress),
+) -> Result<(usize, u64), ExecutorError> {
+    // Read and parse the index file (small — typically a few KB).
+    let idx_strict = bounded_path(source, idx_path)?;
+    let idx_data = idx_strict.read()?;
+    let index = cnc_formats::bag_idx::IdxFile::parse(&idx_data)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+    // Open the bag file for seeking — not loaded into memory.
+    let bag_strict = bounded_path(source, bag_path)?;
+    let mut bag_file = bag_strict.open_file()?;
+
+    let mut files_written = 0;
+    let mut total_bytes: u64 = 0;
+
+    for mapping in entries {
+        let entry = index
+            .get(mapping.from)
+            .ok_or_else(|| ExecutorError::ZipError {
+                detail: format!("BAG/IDX entry '{}' not found in {}", mapping.from, idx_path),
+            })?;
+
+        // Seek to the entry's offset in the .bag file and read its data.
+        bag_file.seek(SeekFrom::Start(entry.offset as u64))?;
+        let mut buf = vec![0u8; entry.size as usize];
+        bag_file.read_exact(&mut buf)?;
+
+        let dst = bounded_path(content, mapping.to)?;
+        dst.create_parent_dir_all()?;
+        dst.write(&buf)?;
+
+        let bytes = buf.len() as u64;
+        on_progress(InstallProgress::FileWritten {
+            path: dst.unstrict(),
+            bytes,
+        });
+        files_written += 1;
+        total_bytes += bytes;
+    }
+
+    Ok((files_written, total_bytes))
+}
+
 /// Returns a human-readable description of an install action.
 fn describe_action(action: &InstallAction) -> String {
     match action {
@@ -484,6 +678,37 @@ fn describe_action(action: &InstallAction) -> String {
         }
         InstallAction::Delete { path } => {
             format!("Deleting {path}")
+        }
+        InstallAction::ExtractBig {
+            source_big,
+            entries,
+        } => {
+            format!(
+                "Extracting {} entry/entries from BIG {}",
+                entries.len(),
+                source_big
+            )
+        }
+        InstallAction::ExtractMeg {
+            source_meg,
+            entries,
+        } => {
+            format!(
+                "Extracting {} entry/entries from MEG {}",
+                entries.len(),
+                source_meg
+            )
+        }
+        InstallAction::ExtractBagIdx {
+            source_idx,
+            entries,
+            ..
+        } => {
+            format!(
+                "Extracting {} entry/entries from BAG/IDX {}",
+                entries.len(),
+                source_idx
+            )
         }
     }
 }

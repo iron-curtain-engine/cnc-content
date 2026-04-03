@@ -28,6 +28,7 @@ required-features = ["cli"]
 app-path = "1.1"
 cnc-formats = { git = "https://github.com/iron-curtain-engine/cnc-formats.git", default-features = false, features = [
     "encrypted-mix",
+    "meg",
 ] }
 serde = { version = "1", features = ["derive"] }
 sha1 = "0.11"

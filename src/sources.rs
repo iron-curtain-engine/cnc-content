@@ -321,4 +321,190 @@ pub static ALL_SOURCES: &[ContentSource] = &[
         }],
         platform_hint: Some(PlatformHint::GogGameId(1207659107)),
     },
+    // ══════════════════════════════════════════════════════════════════════
+    // Tiberian Sun sources — local only
+    //
+    // TS was briefly free-to-download from EA but later removed.
+    // Placeholder SHA-1 hashes are used until verified from real media.
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── Disc sources ──────────────────────────────────────────────────
+    ContentSource {
+        id: SourceId::TsDisc,
+        title: "Tiberian Sun Retail CD",
+        source_type: SourceType::Disc,
+        id_files: &[IdFileCheck {
+            path: "TIBSUN.MIX",
+            sha1: "0000000000000000000000000000000000000000",
+            prefix_length: None,
+        }],
+        platform_hint: None,
+    },
+    ContentSource {
+        id: SourceId::TsFirestormDisc,
+        title: "Firestorm Expansion CD",
+        source_type: SourceType::Disc,
+        id_files: &[IdFileCheck {
+            path: "E01SC01.MIX",
+            sha1: "0000000000000000000000000000000000000000",
+            prefix_length: None,
+        }],
+        platform_hint: None,
+    },
+    // ── Steam / Origin sources ────────────────────────────────────────
+    ContentSource {
+        id: SourceId::TsSteamTuc,
+        title: "Steam — The Ultimate Collection (TS)",
+        // Manual until Steam app ID is confirmed; then upgrade to Steam.
+        source_type: SourceType::Manual,
+        id_files: &[IdFileCheck {
+            path: "TIBSUN.MIX",
+            sha1: "0000000000000000000000000000000000000000",
+            prefix_length: None,
+        }],
+        platform_hint: None,
+    },
+    ContentSource {
+        id: SourceId::TsOriginTuc,
+        title: "Origin — The Ultimate Collection (TS)",
+        source_type: SourceType::Origin,
+        id_files: &[IdFileCheck {
+            path: "TIBSUN.MIX",
+            sha1: "0000000000000000000000000000000000000000",
+            prefix_length: None,
+        }],
+        platform_hint: Some(PlatformHint::RegistryKey {
+            key: r"SOFTWARE\EA Games\Tiberian Sun",
+            value: "Install Dir",
+        }),
+    },
+    // ══════════════════════════════════════════════════════════════════════
+    // Red Alert 2 sources — local only (NOT freeware, no downloads)
+    //
+    // Placeholder SHA-1 hashes are used until verified from real media.
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── Disc sources ──────────────────────────────────────────────────
+    ContentSource {
+        id: SourceId::Ra2Disc,
+        title: "Red Alert 2 Retail CD",
+        source_type: SourceType::Disc,
+        id_files: &[IdFileCheck {
+            path: "RA2.MIX",
+            sha1: "0000000000000000000000000000000000000000",
+            prefix_length: None,
+        }],
+        platform_hint: None,
+    },
+    ContentSource {
+        id: SourceId::Ra2YrDisc,
+        title: "Yuri's Revenge Expansion CD",
+        source_type: SourceType::Disc,
+        id_files: &[IdFileCheck {
+            path: "RA2MD.MIX",
+            sha1: "0000000000000000000000000000000000000000",
+            prefix_length: None,
+        }],
+        platform_hint: None,
+    },
+    ContentSource {
+        id: SourceId::Ra2TheFirstDecade,
+        title: "C&C: The First Decade (RA2 + YR)",
+        source_type: SourceType::Disc,
+        id_files: &[IdFileCheck {
+            path: "RA2.MIX",
+            sha1: "0000000000000000000000000000000000000000",
+            prefix_length: None,
+        }],
+        platform_hint: None,
+    },
+    // ── Steam / Origin sources ────────────────────────────────────────
+    ContentSource {
+        id: SourceId::Ra2SteamTuc,
+        title: "Steam — The Ultimate Collection (RA2)",
+        source_type: SourceType::Steam,
+        id_files: &[IdFileCheck {
+            // ra2.mix is the primary game archive — present in all RA2 editions.
+            path: "ra2.mix",
+            sha1: "3bd92246320f4bf1ff1ed76207ee793c33ff6a05",
+            prefix_length: None,
+        }],
+        platform_hint: Some(PlatformHint::SteamAppId(2229850)),
+    },
+    ContentSource {
+        id: SourceId::Ra2OriginTuc,
+        title: "Origin — The Ultimate Collection (RA2)",
+        source_type: SourceType::Origin,
+        id_files: &[IdFileCheck {
+            // Same TUC build as Steam — identical ra2.mix hash.
+            path: "ra2.mix",
+            sha1: "3bd92246320f4bf1ff1ed76207ee793c33ff6a05",
+            prefix_length: None,
+        }],
+        platform_hint: Some(PlatformHint::RegistryKey {
+            key: r"SOFTWARE\EA Games\Red Alert 2",
+            value: "Install Dir",
+        }),
+    },
+    // ══════════════════════════════════════════════════════════════════════
+    // C&C Generals sources — local only (NOT freeware, no downloads)
+    //
+    // Generals uses BIG archives (BIGF format) instead of MIX.
+    // Placeholder SHA-1 hashes are used until verified from real media.
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── Disc sources ──────────────────────────────────────────────────
+    ContentSource {
+        id: SourceId::GenDisc,
+        title: "C&C Generals Retail Disc",
+        source_type: SourceType::Disc,
+        id_files: &[IdFileCheck {
+            path: "INI.big",
+            sha1: "0000000000000000000000000000000000000000",
+            prefix_length: None,
+        }],
+        platform_hint: None,
+    },
+    ContentSource {
+        id: SourceId::GenZhDisc,
+        title: "Zero Hour Expansion Disc",
+        source_type: SourceType::Disc,
+        id_files: &[IdFileCheck {
+            path: "INIZH.big",
+            sha1: "0000000000000000000000000000000000000000",
+            prefix_length: None,
+        }],
+        platform_hint: None,
+    },
+    // ── Steam / Origin sources ────────────────────────────────────────
+    ContentSource {
+        id: SourceId::GenSteamTuc,
+        title: "Steam — The Ultimate Collection (Generals)",
+        // Steam TUC merges base Generals + Zero Hour into a single install
+        // directory — there is no separate INIZH.big. Both GenBase and
+        // GenZeroHour packages list this source.
+        source_type: SourceType::Steam,
+        id_files: &[IdFileCheck {
+            // INI.big is the primary configuration archive for Generals.
+            path: "INI.big",
+            sha1: "3f1957f73bff6aebef8220ed5392a22b274420d6",
+            prefix_length: None,
+        }],
+        platform_hint: Some(PlatformHint::SteamAppId(2229870)),
+    },
+    ContentSource {
+        id: SourceId::GenOriginTuc,
+        title: "Origin — The Ultimate Collection (Generals)",
+        source_type: SourceType::Origin,
+        id_files: &[IdFileCheck {
+            // Same TUC build as Steam — identical INI.big hash.
+            path: "INI.big",
+            sha1: "3f1957f73bff6aebef8220ed5392a22b274420d6",
+            prefix_length: None,
+        }],
+        platform_hint: Some(PlatformHint::RegistryKey {
+            key: r"SOFTWARE\EA Games\Command and Conquer Generals Zero Hour",
+            value: "InstallPath",
+        }),
+    },
 ];

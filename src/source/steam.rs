@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025–present Iron Curtain contributors
 
-//! Steam library probe — detects RA1 content in Steam installations.
+//! Steam library probe — detects C&C content in Steam installations.
 //!
 //! Finds Steam's install path, parses `libraryfolders.vdf` to locate all
 //! library folders, then checks for relevant appmanifest files to find
-//! game install directories.
+//! game install directories. Supports RA1, TD, C&C Remastered, RA2, and
+//! Generals via The Ultimate Collection.
 
 use std::path::{Path, PathBuf};
 
@@ -14,10 +15,17 @@ use crate::sources::ALL_SOURCES;
 use crate::{PlatformHint, SourceType};
 
 /// Known Steam app IDs for C&C content.
+///
+/// Each entry maps a Steam app ID to its default install directory name
+/// (the `installdir` field from the appmanifest). The probe checks for
+/// appmanifest files and falls back to this directory name if VDF parsing
+/// of the manifest fails.
 const STEAM_APP_IDS: &[(u32, &str)] = &[
-    (2229840, "CnCRedalert"),     // The Ultimate Collection — RA
-    (2229830, "CnCTiberianDawn"), // The Ultimate Collection — C&C
-    (1213210, "CnCRemastered"),   // C&C Remastered Collection
+    (2229840, "CnCRedalert"),                    // The Ultimate Collection — RA
+    (2229830, "CnCTiberianDawn"),                // The Ultimate Collection — TD
+    (1213210, "CnCRemastered"),                  // C&C Remastered Collection
+    (2229850, "Command & Conquer Red Alert II"), // The Ultimate Collection — RA2 + YR
+    (2229870, "Command and Conquer Generals"),   // The Ultimate Collection — Generals + ZH
 ];
 
 /// Probes all Steam library folders for C&C game installs.
@@ -255,5 +263,113 @@ mod tests {
     fn probe_returns_empty_when_steam_not_installed() {
         let results = probe();
         let _ = results;
+    }
+
+    // ── App ID coverage tests ─────────────────────────────────────
+
+    /// Every Steam-type source definition must have a matching entry in `STEAM_APP_IDS`.
+    ///
+    /// If a new `SourceType::Steam` source is added to `ALL_SOURCES` but the
+    /// corresponding app ID is not registered in `STEAM_APP_IDS`, the probe
+    /// will never search for it and the game will be undetectable via Steam.
+    #[test]
+    fn steam_sources_have_matching_app_ids() {
+        let steam_sources: Vec<_> = ALL_SOURCES
+            .iter()
+            .filter(|s| s.source_type == SourceType::Steam)
+            .collect();
+
+        assert!(
+            !steam_sources.is_empty(),
+            "expected at least one Steam-type source"
+        );
+
+        for source in &steam_sources {
+            let app_id = match source.platform_hint {
+                Some(PlatformHint::SteamAppId(id)) => id,
+                _ => panic!(
+                    "Steam source {:?} has no SteamAppId platform hint",
+                    source.id
+                ),
+            };
+
+            let found = STEAM_APP_IDS.iter().any(|&(id, _)| id == app_id);
+            assert!(
+                found,
+                "Steam source {:?} has app ID {app_id} which is not in STEAM_APP_IDS",
+                source.id
+            );
+        }
+    }
+
+    /// Every entry in `STEAM_APP_IDS` must correspond to at least one Steam-type source.
+    ///
+    /// An orphaned app ID in the constants wastes probe time searching for
+    /// installs that no source definition can match.
+    #[test]
+    fn steam_app_ids_have_matching_sources() {
+        for &(app_id, _installdir) in STEAM_APP_IDS {
+            let has_source = ALL_SOURCES.iter().any(|s| {
+                s.source_type == SourceType::Steam
+                    && matches!(s.platform_hint, Some(PlatformHint::SteamAppId(id)) if id == app_id)
+            });
+            assert!(
+                has_source,
+                "STEAM_APP_IDS entry {app_id} has no matching Steam-type source in ALL_SOURCES"
+            );
+        }
+    }
+
+    /// RA2 The Ultimate Collection uses Steam app ID 2229850.
+    ///
+    /// This is a regression guard: the app ID was confirmed from a real
+    /// Steam appmanifest_2229850.acf file. Installing RA2 via Steam
+    /// depends on this mapping being correct.
+    #[test]
+    fn ra2_steam_app_id_is_correct() {
+        let ra2_source = ALL_SOURCES
+            .iter()
+            .find(|s| s.id == crate::SourceId::Ra2SteamTuc)
+            .expect("Ra2SteamTuc source must exist");
+
+        assert_eq!(ra2_source.source_type, SourceType::Steam);
+        assert_eq!(
+            ra2_source.platform_hint,
+            Some(PlatformHint::SteamAppId(2229850))
+        );
+    }
+
+    /// Generals The Ultimate Collection uses Steam app ID 2229870.
+    ///
+    /// Confirmed from a real Steam appmanifest_2229870.acf file. This
+    /// app ID covers both base Generals and Zero Hour content.
+    #[test]
+    fn generals_steam_app_id_is_correct() {
+        let gen_source = ALL_SOURCES
+            .iter()
+            .find(|s| s.id == crate::SourceId::GenSteamTuc)
+            .expect("GenSteamTuc source must exist");
+
+        assert_eq!(gen_source.source_type, SourceType::Steam);
+        assert_eq!(
+            gen_source.platform_hint,
+            Some(PlatformHint::SteamAppId(2229870))
+        );
+    }
+
+    /// The `STEAM_APP_IDS` table has no duplicate app IDs.
+    ///
+    /// Duplicate entries would cause the same install directory to be probed
+    /// multiple times, wasting I/O and potentially producing duplicate results.
+    #[test]
+    fn steam_app_ids_are_unique() {
+        let mut ids: Vec<u32> = STEAM_APP_IDS.iter().map(|&(id, _)| id).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(
+            ids.len(),
+            STEAM_APP_IDS.len(),
+            "STEAM_APP_IDS contains duplicate entries"
+        );
     }
 }

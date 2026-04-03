@@ -37,28 +37,34 @@ source. Works as a standalone CLI tool or as a library for engine integration.
 
 ## Supported Games
 
-| Game | Slug | Status |
-|------|------|--------|
-| Command & Conquer: Red Alert | `ra` | Freeware (EA, 2008) — downloadable |
-| Command & Conquer: Tiberian Dawn | `td` | Freeware (EA, 2007) — downloadable |
-| Dune II: The Building of a Dynasty | `dune2` | NOT freeware — local source only |
-| Dune 2000 | `dune2000` | NOT freeware — local source only |
+| Game                               | Slug       | Status                             |
+| ---------------------------------- | ---------- | ---------------------------------- |
+| Command & Conquer: Red Alert       | `ra`       | Freeware (EA, 2008) — downloadable |
+| Command & Conquer: Tiberian Dawn   | `td`       | Freeware (EA, 2007) — downloadable |
+| Dune II: The Building of a Dynasty | `dune2`    | NOT freeware — local source only   |
+| Dune 2000                          | `dune2000` | NOT freeware — local source only   |
+| Command & Conquer: Tiberian Sun    | `ts`       | NOT freeware — local source only   |
+| Command & Conquer: Red Alert 2     | `ra2`      | NOT freeware — local source only   |
+| Command & Conquer: Generals        | `generals` | NOT freeware — local source only   |
 
 ## Content Sources
 
-| Source | Type | Games |
-|--------|------|-------|
-| OpenRA HTTP mirrors | Download | RA, TD |
-| Archive.org / CNCNZ | Download | RA, TD |
-| Allied / Soviet / CS / AM Discs | Disc | RA |
-| GDI / Nod / Covert Ops Discs | Disc | TD |
-| The First Decade DVD | InstallShield | RA |
-| Steam — The Ultimate Collection | Steam | RA, TD |
-| Steam — C&C Remastered | Steam | RA, TD |
-| Origin / EA App | Origin | RA, TD |
-| GOG.com | GOG | Dune 2, Dune 2000 |
-| C&C 1995 (registry) | Registry | RA |
-| Dune 2 / Dune 2000 Discs | Disc | Dune 2, Dune 2000 |
+| Source                           | Type          | Games                   |
+| -------------------------------- | ------------- | ----------------------- |
+| OpenRA HTTP mirrors              | Download      | RA, TD                  |
+| Archive.org / CNCNZ              | Download      | RA, TD                  |
+| Allied / Soviet / CS / AM Discs  | Disc          | RA                      |
+| GDI / Nod / Covert Ops Discs     | Disc          | TD                      |
+| The First Decade DVD             | InstallShield | RA, RA2                 |
+| Steam — The Ultimate Collection  | Steam         | RA, TD, TS*, RA2*, Gen* |
+| Steam — C&C Remastered           | Steam         | RA, TD                  |
+| Origin / EA App                  | Origin        | RA, TD, TS, RA2, Gen    |
+| GOG.com                          | GOG           | Dune 2, Dune 2000       |
+| C&C 1995 (registry)              | Registry      | RA                      |
+| Dune 2 / Dune 2000 Discs         | Disc          | Dune 2, Dune 2000       |
+| TS / RA2 / Generals Retail Discs | Disc          | TS, RA2, Gen            |
+
+\* Steam app IDs for TS, RA2, and Generals TUC are pending confirmation.
 
 ## Installation
 
@@ -133,21 +139,21 @@ if !cnc_content::is_content_complete(root, GameId::RedAlert) {
 
 ## Features
 
-| Feature | Default | Description |
-|---------|---------|-------------|
-| `cli` | Yes | `cnc-content` binary with progress bars (implies `download`) |
-| `download` | Yes | HTTP download + ZIP extraction (`ureq`, `zip`) |
-| `fast-verify` | Yes | Parallel SHA-256 verification via `rayon` + SIMD bitfields |
-| `torrent` | No | BitTorrent P2P transport via `librqbit` |
+| Feature       | Default | Description                                                  |
+| ------------- | ------- | ------------------------------------------------------------ |
+| `cli`         | Yes     | `cnc-content` binary with progress bars (implies `download`) |
+| `download`    | Yes     | HTTP download + ZIP extraction (`ureq`, `zip`)               |
+| `fast-verify` | Yes     | Parallel SHA-256 verification via `rayon` + SIMD bitfields   |
+| `torrent`     | No      | BitTorrent P2P transport via `librqbit`                      |
 
 ## Environment Variables
 
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `CNC_CONTENT_ROOT` | Override the content directory | Portable path next to executable |
-| `CNC_MIRROR_LIST_URL` | Override the mirror list URL for all downloads | Per-package URL from download definitions |
-| `CNC_DOWNLOAD_TIMEOUT` | HTTP download timeout in seconds | `300` |
-| `CNC_NO_P2P` | Disable P2P transport (`1` = disabled) | `0` (P2P enabled when compiled in) |
+| Variable               | Purpose                                        | Default                                   |
+| ---------------------- | ---------------------------------------------- | ----------------------------------------- |
+| `CNC_CONTENT_ROOT`     | Override the content directory                 | Portable path next to executable          |
+| `CNC_MIRROR_LIST_URL`  | Override the mirror list URL for all downloads | Per-package URL from download definitions |
+| `CNC_DOWNLOAD_TIMEOUT` | HTTP download timeout in seconds               | `300`                                     |
+| `CNC_NO_P2P`           | Disable P2P transport (`1` = disabled)         | `0` (P2P enabled when compiled in)        |
 
 CLI flags take precedence over environment variables.
 
@@ -170,7 +176,7 @@ definitions from OpenRA's GPL-licensed data).
 - **Feature-gated networking** — `download` feature pulls in `ureq` + `zip`;
   disable it for library-only use without HTTP dependencies
 - **Freeware-only downloads** — only EA-declared freeware (RA, TD) can be
-  downloaded; Dune 2 and Dune 2000 require user-owned copies
+  downloaded; all other games require user-owned copies
 
 ## Design Documents
 

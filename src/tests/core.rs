@@ -4,7 +4,7 @@
 //! Integration tests for `GameId`, package definitions, and source invariants.
 //!
 //! Verifies that every enum variant has a matching table entry, slugs round-trip,
-//! and required-package counts are sane across all four supported games.
+//! and required-package counts are sane across all seven supported games.
 
 use super::super::*;
 
@@ -39,6 +39,13 @@ fn game_id_from_slug_aliases() {
     assert_eq!(GameId::from_slug("dune2"), Some(GameId::Dune2));
     assert_eq!(GameId::from_slug("dune2000"), Some(GameId::Dune2000));
     assert_eq!(GameId::from_slug("d2k"), Some(GameId::Dune2000));
+    assert_eq!(GameId::from_slug("ts"), Some(GameId::TiberianSun));
+    assert_eq!(GameId::from_slug("tiberiansun"), Some(GameId::TiberianSun));
+    assert_eq!(GameId::from_slug("ra2"), Some(GameId::RedAlert2));
+    assert_eq!(GameId::from_slug("redalert2"), Some(GameId::RedAlert2));
+    assert_eq!(GameId::from_slug("gen"), Some(GameId::Generals));
+    assert_eq!(GameId::from_slug("generals"), Some(GameId::Generals));
+    assert_eq!(GameId::from_slug("zh"), Some(GameId::Generals));
     assert_eq!(GameId::from_slug("unknown"), None);
 }
 
@@ -125,6 +132,73 @@ fn dune2000_package_has_definition() {
     assert!(!pkg.test_files.is_empty());
 }
 
+// ── Tiberian Sun package tests ──────────────────────────────────────
+
+/// Verifies that every Tiberian Sun `PackageId` variant has a package definition.
+///
+/// Ensures all TS package constants resolve to a valid package with a non-empty
+/// title and at least one test file and source.
+#[test]
+fn all_ts_package_ids_have_definitions() {
+    let ids = [
+        PackageId::TsBase,
+        PackageId::TsFirestorm,
+        PackageId::TsMusic,
+        PackageId::TsMovies,
+    ];
+    for id in ids {
+        let pkg = package(id).unwrap();
+        assert_eq!(pkg.id, id);
+        assert_eq!(pkg.game, GameId::TiberianSun);
+        assert!(!pkg.title.is_empty());
+        assert!(!pkg.test_files.is_empty());
+        assert!(!pkg.sources.is_empty());
+    }
+}
+
+// ── Red Alert 2 package tests ───────────────────────────────────────
+
+/// Verifies that every Red Alert 2 `PackageId` variant has a package definition.
+///
+/// Ensures all RA2 package constants resolve to a valid package with a non-empty
+/// title and at least one test file and source.
+#[test]
+fn all_ra2_package_ids_have_definitions() {
+    let ids = [
+        PackageId::Ra2Base,
+        PackageId::Ra2YurisRevenge,
+        PackageId::Ra2Music,
+        PackageId::Ra2Movies,
+    ];
+    for id in ids {
+        let pkg = package(id).unwrap();
+        assert_eq!(pkg.id, id);
+        assert_eq!(pkg.game, GameId::RedAlert2);
+        assert!(!pkg.title.is_empty());
+        assert!(!pkg.test_files.is_empty());
+        assert!(!pkg.sources.is_empty());
+    }
+}
+
+// ── Generals package tests ──────────────────────────────────────────
+
+/// Verifies that every Generals `PackageId` variant has a package definition.
+///
+/// Ensures all Gen package constants resolve to a valid package with a non-empty
+/// title and at least one test file and source.
+#[test]
+fn all_gen_package_ids_have_definitions() {
+    let ids = [PackageId::GenBase, PackageId::GenZeroHour];
+    for id in ids {
+        let pkg = package(id).unwrap();
+        assert_eq!(pkg.id, id);
+        assert_eq!(pkg.game, GameId::Generals);
+        assert!(!pkg.title.is_empty());
+        assert!(!pkg.test_files.is_empty());
+        assert!(!pkg.sources.is_empty());
+    }
+}
+
 // ── Source tests ────────────────────────────────────────────────────
 
 /// Verifies that every `SourceId` variant has a fully populated source definition.
@@ -161,6 +235,22 @@ fn all_source_ids_have_definitions() {
         // Dune 2000 sources
         SourceId::Dune2000Disc,
         SourceId::GogDune2000,
+        // TS sources
+        SourceId::TsDisc,
+        SourceId::TsFirestormDisc,
+        SourceId::TsSteamTuc,
+        SourceId::TsOriginTuc,
+        // RA2 sources
+        SourceId::Ra2Disc,
+        SourceId::Ra2YrDisc,
+        SourceId::Ra2TheFirstDecade,
+        SourceId::Ra2SteamTuc,
+        SourceId::Ra2OriginTuc,
+        // Generals sources
+        SourceId::GenDisc,
+        SourceId::GenZhDisc,
+        SourceId::GenSteamTuc,
+        SourceId::GenOriginTuc,
     ];
     for id in ids {
         let src = source(id).unwrap();
@@ -168,4 +258,47 @@ fn all_source_ids_have_definitions() {
         assert!(!src.title.is_empty());
         assert!(!src.id_files.is_empty());
     }
+}
+
+// ── Required-package invariant tests ────────────────────────────────
+
+/// Verifies that exactly one Tiberian Sun package is marked required: the base package.
+///
+/// TS expansions (Firestorm, music, movies) are optional; only the base data files
+/// are needed to launch.
+#[test]
+fn ts_required_package_is_base() {
+    let required: Vec<PackageId> = packages::ALL_PACKAGES
+        .iter()
+        .filter(|p| p.game == GameId::TiberianSun && p.required)
+        .map(|p| p.id)
+        .collect();
+    assert_eq!(required, vec![PackageId::TsBase]);
+}
+
+/// Verifies that exactly one Red Alert 2 package is marked required: the base package.
+///
+/// RA2 expansions (Yuri's Revenge, music, movies) are optional; only the base data
+/// files are needed to launch.
+#[test]
+fn ra2_required_package_is_base() {
+    let required: Vec<PackageId> = packages::ALL_PACKAGES
+        .iter()
+        .filter(|p| p.game == GameId::RedAlert2 && p.required)
+        .map(|p| p.id)
+        .collect();
+    assert_eq!(required, vec![PackageId::Ra2Base]);
+}
+
+/// Verifies that exactly one Generals package is marked required: the base package.
+///
+/// Zero Hour is optional; only the base game's BIG archives are needed to launch.
+#[test]
+fn gen_required_package_is_base() {
+    let required: Vec<PackageId> = packages::ALL_PACKAGES
+        .iter()
+        .filter(|p| p.game == GameId::Generals && p.required)
+        .map(|p| p.id)
+        .collect();
+    assert_eq!(required, vec![PackageId::GenBase]);
 }

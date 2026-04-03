@@ -129,7 +129,7 @@ struct Cli {
     #[arg(long, global = true)]
     openra: bool,
 
-    /// Game to manage [possible values: ra, td, dune2, dune2000].
+    /// Game to manage [possible values: ra, td, dune2, dune2000, ts, ra2, generals].
     #[arg(long, short, global = true, default_value = "ra")]
     game: String,
 

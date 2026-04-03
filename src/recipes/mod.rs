@@ -348,6 +348,82 @@ pub static ALL_RECIPES: &[InstallRecipe] = &[
             }],
         }],
     },
+    // ══════════════════════════════════════════════════════════════════════
+    // Red Alert 2 recipes
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── Steam TUC (AppId 2229850) — RA2 + Yuri's Revenge ─────────────
+    //
+    // The Steam TUC install directory contains all MIX archives directly
+    // in the root — no subdirectories. Both base RA2 and YR files coexist.
+    InstallRecipe {
+        source: SourceId::Ra2SteamTuc,
+        package: PackageId::Ra2Base,
+        actions: &[InstallAction::Copy {
+            files: &RA2_BASE_COPY,
+        }],
+    },
+    InstallRecipe {
+        source: SourceId::Ra2SteamTuc,
+        package: PackageId::Ra2YurisRevenge,
+        actions: &[InstallAction::Copy {
+            files: &RA2_YR_COPY,
+        }],
+    },
+    InstallRecipe {
+        source: SourceId::Ra2SteamTuc,
+        package: PackageId::Ra2Music,
+        actions: &[InstallAction::Copy {
+            files: &RA2_MUSIC_COPY,
+        }],
+    },
+    // ── Origin TUC (same layout as Steam TUC) ────────────────────────
+    InstallRecipe {
+        source: SourceId::Ra2OriginTuc,
+        package: PackageId::Ra2Base,
+        actions: &[InstallAction::Copy {
+            files: &RA2_BASE_COPY,
+        }],
+    },
+    InstallRecipe {
+        source: SourceId::Ra2OriginTuc,
+        package: PackageId::Ra2YurisRevenge,
+        actions: &[InstallAction::Copy {
+            files: &RA2_YR_COPY,
+        }],
+    },
+    InstallRecipe {
+        source: SourceId::Ra2OriginTuc,
+        package: PackageId::Ra2Music,
+        actions: &[InstallAction::Copy {
+            files: &RA2_MUSIC_COPY,
+        }],
+    },
+    // ══════════════════════════════════════════════════════════════════════
+    // C&C Generals recipes
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── Steam TUC (AppId 2229870) — Generals + Zero Hour merged ──────
+    //
+    // The Steam TUC merges base Generals and Zero Hour into a single
+    // install directory. All BIG archives sit in the root alongside loose
+    // data under Data/. Zero Hour content is folded into the base archives
+    // — there are no separate INIZH.big / W3DZH.big files.
+    InstallRecipe {
+        source: SourceId::GenSteamTuc,
+        package: PackageId::GenBase,
+        actions: &[InstallAction::Copy {
+            files: &GEN_BASE_COPY,
+        }],
+    },
+    // ── Origin TUC (same layout as Steam TUC) ────────────────────────
+    InstallRecipe {
+        source: SourceId::GenOriginTuc,
+        package: PackageId::GenBase,
+        actions: &[InstallAction::Copy {
+            files: &GEN_BASE_COPY,
+        }],
+    },
 ];
 
 // ══════════════════════════════════════════════════════════════════════
@@ -1356,3 +1432,73 @@ static AFTERMATH_DISC_MUSIC_ACTIONS: [InstallAction; 1] = [InstallAction::Copy {
 static CS_DISC_MUSIC_ACTIONS: [InstallAction; 1] = [InstallAction::Copy {
     files: &CS_MUSIC_COPY,
 }];
+
+// ══════════════════════════════════════════════════════════════════════
+//  Red Alert 2 file mappings — Steam / Origin TUC layout
+// ══════════════════════════════════════════════════════════════════════
+
+/// RA2 base game files — direct copy from the TUC install root.
+///
+/// The TUC places all MIX archives flat in the install directory. File
+/// names on disk use mixed case but are accessed case-insensitively
+/// on Windows; we use the on-disk case for `from` and the expected
+/// content-root case for `to`.
+static RA2_BASE_COPY: [FileMapping; 3] = [
+    FileMapping {
+        from: "ra2.mix",
+        to: "ra2.mix",
+    },
+    FileMapping {
+        from: "language.mix",
+        to: "language.mix",
+    },
+    FileMapping {
+        from: "MULTI.MIX",
+        to: "multi.mix",
+    },
+];
+
+/// Yuri's Revenge expansion files — direct copy.
+static RA2_YR_COPY: [FileMapping; 2] = [
+    FileMapping {
+        from: "ra2md.mix",
+        to: "ra2md.mix",
+    },
+    FileMapping {
+        from: "langmd.mix",
+        to: "langmd.mix",
+    },
+];
+
+/// RA2 music — direct copy.
+///
+/// The Steam TUC stores this as `THEME.MIX` (uppercase); the content root
+/// expects lowercase `theme.mix`.
+static RA2_MUSIC_COPY: [FileMapping; 1] = [FileMapping {
+    from: "THEME.MIX",
+    to: "theme.mix",
+}];
+
+// ══════════════════════════════════════════════════════════════════════
+//  C&C Generals file mappings — Steam / Origin TUC layout
+// ══════════════════════════════════════════════════════════════════════
+
+/// Generals base game BIG archives — direct copy from the TUC install root.
+///
+/// The Steam TUC merges base Generals and Zero Hour into a single install
+/// directory. All BIG archives are in the root alongside loose files in
+/// Data/. We copy only the three archives listed as test_files for GenBase.
+static GEN_BASE_COPY: [FileMapping; 3] = [
+    FileMapping {
+        from: "INI.big",
+        to: "INI.big",
+    },
+    FileMapping {
+        from: "Terrain.big",
+        to: "Terrain.big",
+    },
+    FileMapping {
+        from: "W3D.big",
+        to: "W3D.big",
+    },
+];

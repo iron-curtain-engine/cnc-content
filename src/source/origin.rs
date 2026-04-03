@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025–present Iron Curtain contributors
 
-//! Origin / EA App probe — detects RA1 content in Origin or EA App installs.
+//! Origin / EA App probe — detects C&C content in Origin or EA App installs.
 //!
-//! On Windows, reads registry keys to find install directories. On other
-//! platforms, checks common filesystem locations.
+//! On Windows, reads registry keys to find install directories, then falls
+//! back to common filesystem locations. On other platforms, returns empty.
 
 use super::DetectedSource;
 #[cfg(target_os = "windows")]
@@ -119,6 +119,22 @@ fn ea_app_candidates(source: &crate::ContentSource) -> Vec<PathBuf> {
                 // EA App installs to a different path.
                 let ea_app_base = PathBuf::from(&pf86).join("Electronic Arts/EA Games");
                 paths.push(ea_app_base.join("CnCRemastered"));
+            }
+            crate::SourceId::TsOriginTuc => {
+                paths.push(ea_base.join("Command and Conquer Tiberian Sun"));
+                let ea_app = PathBuf::from(&pf86).join("EA Games");
+                paths.push(ea_app.join("Tiberian Sun"));
+            }
+            crate::SourceId::Ra2OriginTuc => {
+                paths.push(ea_base.join("Command and Conquer Red Alert II"));
+                let ea_app = PathBuf::from(&pf86).join("EA Games");
+                paths.push(ea_app.join("Red Alert 2"));
+            }
+            crate::SourceId::GenOriginTuc => {
+                paths.push(ea_base.join("Command and Conquer Generals"));
+                paths.push(ea_base.join("Command and Conquer Generals Zero Hour"));
+                let ea_app = PathBuf::from(&pf86).join("EA Games");
+                paths.push(ea_app.join("Command and Conquer Generals Zero Hour"));
             }
             _ => {}
         }

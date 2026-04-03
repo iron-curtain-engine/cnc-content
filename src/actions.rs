@@ -89,4 +89,40 @@ pub enum InstallAction {
         /// Path relative to the managed content root.
         path: &'static str,
     },
+
+    /// Extract named entries from a BIG archive (C&C Generals / Zero Hour).
+    ///
+    /// BIG archives use the BIGF/BIG4 format with case-insensitive filenames
+    /// and Windows-style backslash separators.
+    ExtractBig {
+        /// Path to the BIG file, relative to the source root.
+        source_big: &'static str,
+        /// Entries to extract (BIG entry name → content-relative path).
+        entries: &'static [FileMapping],
+    },
+
+    /// Extract named entries from a MEG archive (C&C Remastered / Petroglyph).
+    ///
+    /// MEG archives use the Petroglyph .meg/.pgm format with case-insensitive
+    /// filenames.
+    ExtractMeg {
+        /// Path to the MEG file, relative to the source root.
+        source_meg: &'static str,
+        /// Entries to extract (MEG entry name → content-relative path).
+        entries: &'static [FileMapping],
+    },
+
+    /// Extract audio entries from a BAG/IDX pair (Red Alert 2 / Yuri's Revenge).
+    ///
+    /// The IDX file is a small index; the BAG file contains the audio data.
+    /// Entries are located by parsing the IDX, then reading from the BAG at
+    /// the specified offset.
+    ExtractBagIdx {
+        /// Path to the .idx index file, relative to the source root.
+        source_idx: &'static str,
+        /// Path to the .bag data file, relative to the source root.
+        source_bag: &'static str,
+        /// Entries to extract (IDX entry name → content-relative path).
+        entries: &'static [FileMapping],
+    },
 }

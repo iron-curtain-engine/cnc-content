@@ -82,12 +82,12 @@ Curtain engine. It has **no Bevy dependency** and is usable by any downstream
 project that needs to manage C&C game content.
 
 Key responsibilities:
-- Define what each game needs (RA, TD, Dune 2, Dune 2000)
+- Define what each game needs (RA, TD, Dune 2, Dune 2000, TS, RA2, Generals)
 - Identify content sources on disk (discs, Steam, Origin installs)
 - Download freeware content via HTTP mirrors (RA and TD only)
 - Extract content from MIX archives, ZIPs, raw offsets
 - Verify source identity (SHA-1) and installed integrity (SHA-256)
-- Support local source extraction for non-freeware games (Dune 2, Dune 2000)
+- Support local source extraction for non-freeware games (Dune 2, Dune 2000, TS, RA2, Generals)
 
 ## Critical Rules for This Crate
 
@@ -209,11 +209,11 @@ data/
 src/
   lib.rs              — crate root, core types (GameId, PackageId, SeedingPolicy, etc.)
   query.rs            — convenience lookup/filter functions (re-exported from lib.rs)
-  actions.rs          — InstallAction enum (Copy, ExtractMix, ExtractZip, etc.)
+  actions.rs          — InstallAction enum (Copy, ExtractMix, ExtractZip, ExtractBig, ExtractMeg, ExtractBagIdx, etc.)
   config.rs           — Config persistence (TOML), SeedingPolicy, speed limits
   downloads.rs        — HTTP download definitions (16 packages, RA + TD only)
-  packages.rs         — Content package definitions (15 packages, 4 games)
-  sources.rs          — Content source definitions (23 sources with SHA-1 IDFiles)
+  packages.rs         — Content package definitions (25 packages, 7 games)
+  sources.rs          — Content source definitions (36 sources with SHA-1 IDFiles)
   torrent_create.rs   — Deterministic .torrent file generation (bencode, info hash)
   downloader/
     mod.rs            — HTTP download + parallel mirror racing (feature-gated: download)
@@ -334,12 +334,12 @@ data/
 Certain runtime behaviours should be overridable via environment variables
 so that developers, packagers, and CI can adjust without recompilation.
 
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `CNC_CONTENT_ROOT` | Override the default content root directory | Platform-specific app data path |
-| `CNC_MIRROR_LIST_URL` | Override the mirror list URL for all downloads | Per-package URL from download definitions |
-| `CNC_DOWNLOAD_TIMEOUT` | HTTP download timeout in seconds | `300` |
-| `CNC_NO_P2P` | Disable P2P transport entirely (`1` = disabled) | `0` (P2P enabled when feature is compiled in) |
+| Variable               | Purpose                                         | Default                                       |
+| ---------------------- | ----------------------------------------------- | --------------------------------------------- |
+| `CNC_CONTENT_ROOT`     | Override the default content root directory     | Platform-specific app data path               |
+| `CNC_MIRROR_LIST_URL`  | Override the mirror list URL for all downloads  | Per-package URL from download definitions     |
+| `CNC_DOWNLOAD_TIMEOUT` | HTTP download timeout in seconds                | `300`                                         |
+| `CNC_NO_P2P`           | Disable P2P transport entirely (`1` = disabled) | `0` (P2P enabled when feature is compiled in) |
 
 ### Guidelines for adding new overrides
 
@@ -844,8 +844,8 @@ populated yet) but the files and URLs must exist.
 
 ## Current Implementation Status
 
-- Content manifest data: **complete** (15 packages, 23 sources, 16 downloads across 4 games)
-- Install actions: **complete** (Copy, ExtractMix, ExtractMixFromContent, ExtractIscab, ExtractZip, ExtractRaw, Delete)
+- Content manifest data: **complete** (25 packages, 36 sources, 16 downloads across 7 games)
+- Install actions: **complete** (Copy, ExtractMix, ExtractMixFromContent, ExtractIscab, ExtractZip, ExtractRaw, Delete, ExtractBig, ExtractMeg, ExtractBagIdx)
 - HTTP downloader: **complete** (parallel mirror racing + SHA-1 verification)
 - Content verification: **complete** (SHA-256 manifest generation + verification)
 - Source probes: **complete** (Steam VDF, Origin/EA App, GOG Galaxy/classic, Windows registry, OpenRA, disc/ISO)

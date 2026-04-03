@@ -448,4 +448,170 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
         sources: &[SourceId::Dune2000Disc, SourceId::GogDune2000],
         download: None, // NOT freeware — no download
     },
+    // ══════════════════════════════════════════════════════════════════════
+    // Tiberian Sun — LOCAL SOURCE ONLY (NOT freeware, no downloads)
+    //
+    // Tiberian Sun was briefly available for free download from EA but was
+    // later removed. We treat it as local-source-only for legal safety.
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── Required packages ─────────────────────────────────────────────
+    ContentPackage {
+        id: PackageId::TsBase,
+        game: GameId::TiberianSun,
+        title: "Tiberian Sun Base Game",
+        required: true,
+        test_files: &[
+            "tibsun.mix",
+            "cache.mix",
+            "conquer.mix",
+            "local.mix",
+            "isosnow.mix",
+            "isotemp.mix",
+        ],
+        sources: &[
+            SourceId::TsDisc,
+            SourceId::TsSteamTuc,
+            SourceId::TsOriginTuc,
+        ],
+        download: None, // NOT freeware — no download
+    },
+    ContentPackage {
+        id: PackageId::TsFirestorm,
+        game: GameId::TiberianSun,
+        title: "Firestorm Expansion",
+        required: false,
+        test_files: &["e01sc01.mix", "e01sc02.mix"],
+        sources: &[
+            SourceId::TsFirestormDisc,
+            SourceId::TsSteamTuc,
+            SourceId::TsOriginTuc,
+        ],
+        download: None,
+    },
+    // ── Optional packages ─────────────────────────────────────────────
+    ContentPackage {
+        id: PackageId::TsMusic,
+        game: GameId::TiberianSun,
+        title: "Tiberian Sun Music",
+        required: false,
+        test_files: &["scores.mix"],
+        sources: &[
+            SourceId::TsDisc,
+            SourceId::TsSteamTuc,
+            SourceId::TsOriginTuc,
+        ],
+        download: None,
+    },
+    ContentPackage {
+        id: PackageId::TsMovies,
+        game: GameId::TiberianSun,
+        title: "Tiberian Sun Movies",
+        required: false,
+        test_files: &["movies01.mix"],
+        sources: &[
+            SourceId::TsDisc,
+            SourceId::TsSteamTuc,
+            SourceId::TsOriginTuc,
+        ],
+        download: None,
+    },
+    // ══════════════════════════════════════════════════════════════════════
+    // Red Alert 2 — LOCAL SOURCE ONLY (NOT freeware, no downloads)
+    //
+    // Red Alert 2 was never released as freeware. We support extraction from
+    // local copies the user already owns (retail disc, Steam TUC, Origin, etc.).
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── Required packages ─────────────────────────────────────────────
+    ContentPackage {
+        id: PackageId::Ra2Base,
+        game: GameId::RedAlert2,
+        title: "Red Alert 2 Base Game",
+        required: true,
+        test_files: &["ra2.mix", "language.mix", "multi.mix"],
+        sources: &[
+            SourceId::Ra2Disc,
+            SourceId::Ra2TheFirstDecade,
+            SourceId::Ra2SteamTuc,
+            SourceId::Ra2OriginTuc,
+        ],
+        download: None, // NOT freeware — no download
+    },
+    ContentPackage {
+        id: PackageId::Ra2YurisRevenge,
+        game: GameId::RedAlert2,
+        title: "Yuri's Revenge Expansion",
+        required: false,
+        test_files: &["ra2md.mix", "langmd.mix"],
+        sources: &[
+            SourceId::Ra2YrDisc,
+            SourceId::Ra2TheFirstDecade,
+            SourceId::Ra2SteamTuc,
+            SourceId::Ra2OriginTuc,
+        ],
+        download: None,
+    },
+    // ── Optional packages ─────────────────────────────────────────────
+    ContentPackage {
+        id: PackageId::Ra2Music,
+        game: GameId::RedAlert2,
+        title: "Red Alert 2 Music",
+        required: false,
+        test_files: &["theme.mix"],
+        sources: &[
+            SourceId::Ra2Disc,
+            SourceId::Ra2TheFirstDecade,
+            SourceId::Ra2SteamTuc,
+            SourceId::Ra2OriginTuc,
+        ],
+        download: None,
+    },
+    ContentPackage {
+        id: PackageId::Ra2Movies,
+        game: GameId::RedAlert2,
+        title: "Red Alert 2 Movies",
+        required: false,
+        test_files: &["ra2.vqa"],
+        sources: &[
+            SourceId::Ra2Disc,
+            SourceId::Ra2TheFirstDecade,
+            SourceId::Ra2SteamTuc,
+            SourceId::Ra2OriginTuc,
+        ],
+        download: None,
+    },
+    // ══════════════════════════════════════════════════════════════════════
+    // C&C Generals — LOCAL SOURCE ONLY (NOT freeware, no downloads)
+    //
+    // Generals uses BIG archives instead of MIX. We support extraction from
+    // local copies the user already owns (retail disc, Steam TUC, Origin, etc.).
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── Required packages ─────────────────────────────────────────────
+    ContentPackage {
+        id: PackageId::GenBase,
+        game: GameId::Generals,
+        title: "C&C Generals Base Game",
+        required: true,
+        test_files: &["INI.big", "Terrain.big", "W3D.big"],
+        sources: &[
+            SourceId::GenDisc,
+            SourceId::GenSteamTuc,
+            SourceId::GenOriginTuc,
+        ],
+        download: None, // NOT freeware — no download
+    },
+    // The Steam and Origin TUC editions merge Zero Hour content into the
+    // base Generals BIG archives — no separate INIZH.big / W3DZH.big exist.
+    // Only the retail disc has standalone ZH archives.
+    ContentPackage {
+        id: PackageId::GenZeroHour,
+        game: GameId::Generals,
+        title: "Zero Hour Expansion",
+        required: false,
+        test_files: &["INIZH.big", "W3DZH.big"],
+        sources: &[SourceId::GenZhDisc],
+        download: None,
+    },
 ];

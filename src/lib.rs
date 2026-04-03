@@ -4,7 +4,8 @@
 //! # cnc-content — C&C content acquisition
 //!
 //! Standalone crate for downloading, verifying, and managing Command & Conquer
-//! game content. Supports Red Alert, Tiberian Dawn, and Dune 2.
+//! game content. Supports Red Alert, Tiberian Dawn, Dune 2, Dune 2000,
+//! Tiberian Sun, Red Alert 2, and Generals.
 //! Works without Bevy or any game engine dependency.
 //!
 //! ## What it does
@@ -12,7 +13,7 @@
 //! - **Defines** what each game needs (packages, sources, downloads)
 //! - **Identifies** content sources on disk (discs, Steam, GOG, Origin installs)
 //! - **Downloads** content via HTTP mirrors or BitTorrent P2P
-//! - **Extracts** content from MIX archives, InstallShield CABs, ZIPs, raw offsets
+//! - **Extracts** content from MIX, BIG, MEG, BAG/IDX archives, InstallShield CABs, ZIPs, raw offsets
 //! - **Verifies** source identity (SHA-1) and installed integrity (SHA-256)
 //!
 //! ## CLI
@@ -81,6 +82,15 @@ pub enum GameId {
     /// Dune 2000 (1998).
     /// NOT freeware — local source extraction only, no downloads.
     Dune2000,
+    /// Command & Conquer: Tiberian Sun (1999) + Firestorm.
+    /// NOT freeware — local source extraction only.
+    TiberianSun,
+    /// Command & Conquer: Red Alert 2 (2000) + Yuri's Revenge.
+    /// NOT freeware — local source extraction only.
+    RedAlert2,
+    /// Command & Conquer: Generals (2003) + Zero Hour.
+    /// NOT freeware — local source extraction only.
+    Generals,
 }
 
 impl GameId {
@@ -91,6 +101,9 @@ impl GameId {
             GameId::TiberianDawn => "td",
             GameId::Dune2 => "dune2",
             GameId::Dune2000 => "dune2000",
+            GameId::TiberianSun => "ts",
+            GameId::RedAlert2 => "ra2",
+            GameId::Generals => "generals",
         }
     }
 
@@ -101,6 +114,9 @@ impl GameId {
             GameId::TiberianDawn => "Command & Conquer: Tiberian Dawn",
             GameId::Dune2 => "Dune II: The Building of a Dynasty",
             GameId::Dune2000 => "Dune 2000",
+            GameId::TiberianSun => "Command & Conquer: Tiberian Sun",
+            GameId::RedAlert2 => "Command & Conquer: Red Alert 2",
+            GameId::Generals => "Command & Conquer: Generals",
         }
     }
 
@@ -116,6 +132,11 @@ impl GameId {
             "td" | "tiberiandawn" | "tiberian-dawn" | "cnc" | "cnc95" => Some(GameId::TiberianDawn),
             "dune2" | "duneii" | "dune-2" => Some(GameId::Dune2),
             "dune2000" | "dune-2000" | "d2k" => Some(GameId::Dune2000),
+            "ts" | "tiberiansun" | "tiberian-sun" => Some(GameId::TiberianSun),
+            "ra2" | "redalert2" | "red-alert-2" => Some(GameId::RedAlert2),
+            "gen" | "generals" | "cnc-generals" | "zh" | "zerohour" | "zero-hour" => {
+                Some(GameId::Generals)
+            }
             _ => None,
         }
     }
@@ -126,6 +147,9 @@ impl GameId {
         GameId::TiberianDawn,
         GameId::Dune2,
         GameId::Dune2000,
+        GameId::TiberianSun,
+        GameId::RedAlert2,
+        GameId::Generals,
     ];
 }
 
@@ -169,6 +193,32 @@ pub enum PackageId {
     // ── Dune 2000 (local source only) ────────────────────────────────
     /// Complete Dune 2000 game data. NOT freeware — local extraction only.
     Dune2000Base,
+
+    // ── Tiberian Sun (local source only) ────────────────────────────
+    /// Core Tiberian Sun data: tibsun.mix, cache.mix, conquer.mix, etc.
+    TsBase,
+    /// Firestorm expansion data.
+    TsFirestorm,
+    /// Tiberian Sun score music (scores.mix).
+    TsMusic,
+    /// Tiberian Sun FMV cutscenes.
+    TsMovies,
+
+    // ── Red Alert 2 (local source only) ─────────────────────────────
+    /// Core Red Alert 2 data: ra2.mix, language.mix, etc.
+    Ra2Base,
+    /// Yuri's Revenge expansion data.
+    Ra2YurisRevenge,
+    /// Red Alert 2 music (theme.mix).
+    Ra2Music,
+    /// Red Alert 2 FMV cutscenes.
+    Ra2Movies,
+
+    // ── Generals (local source only) ────────────────────────────────
+    /// Core Generals data: INI.big, Terrain.big, W3D.big, etc.
+    GenBase,
+    /// Zero Hour expansion data.
+    GenZeroHour,
 }
 
 /// Identifies a content source — a place content can be obtained from.
@@ -225,6 +275,38 @@ pub enum SourceId {
     Dune2000Disc,
     /// Dune 2000 GOG.com install. NOT freeware — local extraction only.
     GogDune2000,
+
+    // ── Tiberian Sun sources (local only) ────────────────────────────
+    /// Tiberian Sun retail CD.
+    TsDisc,
+    /// Firestorm expansion CD.
+    TsFirestormDisc,
+    /// Steam — The Ultimate Collection (Tiberian Sun).
+    TsSteamTuc,
+    /// Origin / EA App — The Ultimate Collection (Tiberian Sun).
+    TsOriginTuc,
+
+    // ── Red Alert 2 sources (local only) ─────────────────────────────
+    /// Red Alert 2 retail CD.
+    Ra2Disc,
+    /// Yuri's Revenge expansion CD.
+    Ra2YrDisc,
+    /// The First Decade DVD (RA2 + YR).
+    Ra2TheFirstDecade,
+    /// Steam — The Ultimate Collection (Red Alert 2).
+    Ra2SteamTuc,
+    /// Origin / EA App — The Ultimate Collection (Red Alert 2).
+    Ra2OriginTuc,
+
+    // ── Generals sources (local only) ────────────────────────────────
+    /// C&C Generals retail disc.
+    GenDisc,
+    /// Zero Hour expansion disc.
+    GenZhDisc,
+    /// Steam — The Ultimate Collection (Generals).
+    GenSteamTuc,
+    /// Origin / EA App — The Ultimate Collection (Generals).
+    GenOriginTuc,
 }
 
 /// Identifies an HTTP/torrent download package.

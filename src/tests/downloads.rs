@@ -243,17 +243,91 @@ fn steam_sources_have_app_ids() {
     }
 }
 
-/// Verifies that the recipe table contains at least 30 entries covering RA source/package pairs.
+/// Verifies that every (source, package) pair declared in package definitions has a recipe.
 ///
-/// The threshold acts as a regression guard: if a refactor accidentally drops recipe
-/// entries, this lower-bound check will fire before any end-to-end install test reveals
-/// the gap.
+/// When a package lists a source in its `sources` field, the recipe table must have
+/// a matching `InstallRecipe` with that (source, package) pair. A missing recipe means
+/// the content manager can detect a source but has no extraction instructions, leaving
+/// the install silently incomplete.
+///
+/// Known-incomplete pairs are tracked in `known_gaps` and excluded from the assertion.
+/// Remove entries from `known_gaps` as recipes are implemented — the test will catch
+/// any newly-declared pairs that lack recipes.
 #[test]
-fn recipes_cover_all_ra_source_package_pairs() {
-    // Every (source, package) pair listed in RA packages.sources should
-    // have a corresponding recipe.
-    let covered = recipes::ALL_RECIPES.len();
-    assert!(covered >= 30, "Expected at least 30 recipes, got {covered}");
+fn recipes_cover_declared_source_package_pairs() {
+    use std::collections::HashSet;
+
+    // Games whose recipes are not yet implemented at all.
+    let pending_games: HashSet<GameId> = [
+        GameId::TiberianDawn,
+        GameId::TiberianSun,
+        GameId::Dune2,
+        GameId::Dune2000,
+    ]
+    .into_iter()
+    .collect();
+
+    // Individual (source, package) pairs with known missing recipes.
+    // These are tracked here so the test still catches NEW gaps.
+    //
+    // RA — TheFirstDecade ISCAB extraction not yet implemented:
+    // Remastered movies not yet mapped:
+    let known_gaps: HashSet<(SourceId, PackageId)> = [
+        (SourceId::TheFirstDecade, PackageId::RaAftermathBase),
+        (SourceId::TheFirstDecade, PackageId::RaMusic),
+        (SourceId::TheFirstDecade, PackageId::RaMoviesAllied),
+        (SourceId::TheFirstDecade, PackageId::RaMoviesSoviet),
+        (SourceId::SteamRemastered, PackageId::RaMoviesAllied),
+        (SourceId::OriginRemastered, PackageId::RaMoviesAllied),
+        // RA2 — disc / TFD sources not verified against real media:
+        (SourceId::Ra2Disc, PackageId::Ra2Base),
+        (SourceId::Ra2TheFirstDecade, PackageId::Ra2Base),
+        (SourceId::Ra2YrDisc, PackageId::Ra2YurisRevenge),
+        (SourceId::Ra2TheFirstDecade, PackageId::Ra2YurisRevenge),
+        (SourceId::Ra2Disc, PackageId::Ra2Music),
+        (SourceId::Ra2TheFirstDecade, PackageId::Ra2Music),
+        // RA2 — movies inside MIX archives, entry names need research:
+        (SourceId::Ra2Disc, PackageId::Ra2Movies),
+        (SourceId::Ra2TheFirstDecade, PackageId::Ra2Movies),
+        (SourceId::Ra2SteamTuc, PackageId::Ra2Movies),
+        (SourceId::Ra2OriginTuc, PackageId::Ra2Movies),
+        // Generals — disc sources not verified against real media:
+        (SourceId::GenDisc, PackageId::GenBase),
+        (SourceId::GenZhDisc, PackageId::GenZeroHour),
+    ]
+    .into_iter()
+    .collect();
+
+    let recipe_set: HashSet<(SourceId, PackageId)> = recipes::ALL_RECIPES
+        .iter()
+        .map(|r| (r.source, r.package))
+        .collect();
+
+    let mut missing = Vec::new();
+    for pkg in packages::ALL_PACKAGES {
+        if pending_games.contains(&pkg.game) {
+            continue;
+        }
+        for &src_id in pkg.sources {
+            let pair = (src_id, pkg.id);
+            if !recipe_set.contains(&pair) && !known_gaps.contains(&pair) {
+                missing.push(pair);
+            }
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "Missing recipes for {} unexpected (source, package) pairs: {missing:?}",
+        missing.len(),
+    );
+
+    // Regression guard: total recipe count must not silently shrink.
+    let total = recipes::ALL_RECIPES.len();
+    assert!(
+        total >= 48,
+        "Expected at least 48 recipes, got {total} — did a recipe get deleted?"
+    );
 }
 
 /// Verifies that every recipe defines at least one extraction action.
@@ -314,6 +388,15 @@ fn missing_packages_on_empty_dir() {
     let dune2k_missing = missing_required_packages(&tmp, GameId::Dune2000);
     assert_eq!(dune2k_missing.len(), 1);
 
+    let ts_missing = missing_required_packages(&tmp, GameId::TiberianSun);
+    assert_eq!(ts_missing.len(), 1);
+
+    let ra2_missing = missing_required_packages(&tmp, GameId::RedAlert2);
+    assert_eq!(ra2_missing.len(), 1);
+
+    let gen_missing = missing_required_packages(&tmp, GameId::Generals);
+    assert_eq!(gen_missing.len(), 1);
+
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
@@ -332,6 +415,9 @@ fn is_content_complete_false_on_empty() {
     assert!(!is_content_complete(&tmp, GameId::TiberianDawn));
     assert!(!is_content_complete(&tmp, GameId::Dune2));
     assert!(!is_content_complete(&tmp, GameId::Dune2000));
+    assert!(!is_content_complete(&tmp, GameId::TiberianSun));
+    assert!(!is_content_complete(&tmp, GameId::RedAlert2));
+    assert!(!is_content_complete(&tmp, GameId::Generals));
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
@@ -396,8 +482,9 @@ fn openra_content_root_returns_some() {
 
 /// Verifies that `packages_for_game` returns the expected number of packages for each game.
 ///
-/// Pins the package counts (RA: 8, TD: 5, Dune 2: 1, Dune 2000: 1) so that any
-/// accidental addition or deletion of a package entry is caught immediately rather
+/// Pins the package counts (RA: 8, TD: 5, Dune 2: 1, Dune 2000: 1, TS: 4,
+/// RA2: 4, Generals: 2) so that any accidental addition or deletion of a package
+/// entry is caught immediately rather
 /// than silently shifting user-visible install menus.
 #[test]
 fn packages_for_game_returns_correct_counts() {
@@ -412,6 +499,15 @@ fn packages_for_game_returns_correct_counts() {
 
     let dune2k = packages_for_game(GameId::Dune2000);
     assert_eq!(dune2k.len(), 1, "Dune 2000 should have 1 package");
+
+    let ts = packages_for_game(GameId::TiberianSun);
+    assert_eq!(ts.len(), 4, "TS should have 4 packages");
+
+    let ra2 = packages_for_game(GameId::RedAlert2);
+    assert_eq!(ra2.len(), 4, "RA2 should have 4 packages");
+
+    let gen = packages_for_game(GameId::Generals);
+    assert_eq!(gen.len(), 2, "Generals should have 2 packages");
 }
 
 /// Verifies that `downloads_for_game` returns the expected number of download entries per game.
@@ -432,6 +528,19 @@ fn downloads_for_game_returns_correct_counts() {
         dune.len(),
         0,
         "Dune 2 should have 0 downloads (not freeware)"
+    );
+
+    let ts = downloads_for_game(GameId::TiberianSun);
+    assert_eq!(ts.len(), 0, "TS should have 0 downloads (not freeware)");
+
+    let ra2 = downloads_for_game(GameId::RedAlert2);
+    assert_eq!(ra2.len(), 0, "RA2 should have 0 downloads (not freeware)");
+
+    let gen = downloads_for_game(GameId::Generals);
+    assert_eq!(
+        gen.len(),
+        0,
+        "Generals should have 0 downloads (not freeware)"
     );
 }
 
