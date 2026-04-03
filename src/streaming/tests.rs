@@ -5,6 +5,7 @@
 //! or torrent client required.
 
 use super::*;
+use std::io::{self, Read, Seek, SeekFrom};
 
 // ── ByteRange ────────────────────────────────────────────────────
 

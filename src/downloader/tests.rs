@@ -4,6 +4,7 @@
 //! and adversarial inputs (path traversal, mismatched hashes).
 
 use super::*;
+use std::io::Write;
 
 /// Creates an in-memory ZIP archive and writes it to `dest`.
 /// `entries` is a list of `(name, content)` tuples where `name` may
