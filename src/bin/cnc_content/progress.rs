@@ -152,6 +152,14 @@ impl ProgressDisplay {
                 bar.set_message("Verifying SHA-1...");
             }
 
+            DownloadProgress::VerifyingSkipped => {
+                self.transition_to(Phase::Verifying);
+                eprintln!(
+                    "  {} SHA-1 verification skipped (placeholder hash — content integrity unverified)",
+                    style("⚠").yellow().bold()
+                );
+            }
+
             DownloadProgress::Extracting {
                 entry: _,
                 index,

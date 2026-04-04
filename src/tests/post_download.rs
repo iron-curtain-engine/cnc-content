@@ -17,7 +17,7 @@ use super::super::*;
 /// or misidentify the torrent.
 #[test]
 fn archive_org_info_hashes_are_valid_hex() {
-    for dl in downloads::ALL_DOWNLOADS {
+    for dl in downloads::all_downloads() {
         if !dl.info_hash.is_empty() {
             assert_eq!(
                 dl.info_hash.len(),
@@ -50,7 +50,7 @@ fn archive_org_info_hashes_are_valid_hex() {
 #[test]
 fn archive_org_torrents_have_trackers() {
     // Packages with Archive.org info_hash should have Archive.org trackers.
-    for dl in downloads::ALL_DOWNLOADS {
+    for dl in downloads::all_downloads() {
         if !dl.info_hash.is_empty() && !dl.trackers.is_empty() {
             assert!(
                 dl.trackers.iter().any(|t| t.contains("archive.org")),

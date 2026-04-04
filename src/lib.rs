@@ -48,6 +48,7 @@
 
 pub mod actions;
 pub mod config;
+pub mod coordinator;
 #[cfg(feature = "download")]
 pub mod downloader;
 pub mod downloads;
@@ -515,39 +516,54 @@ pub struct InstallRecipe {
 }
 
 /// An HTTP/torrent download package definition.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Loaded from `data/downloads.toml` at first access via `include_str!`.
+/// This is the complete, closed set of content the P2P engine may distribute —
+/// no arbitrary torrents are allowed, only packages listed in the data file.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct DownloadPackage {
     /// Stable identifier.
     pub id: DownloadId,
     /// Which game this download belongs to.
     pub game: GameId,
     /// Human-readable title for UI display.
-    pub title: &'static str,
+    pub title: String,
     /// URL that returns a newline-separated list of mirror URLs.
     /// Empty string if this download uses direct URLs only.
-    pub mirror_list_url: &'static str,
+    pub mirror_list_url: String,
     /// Direct download URLs (tried in order). Used when no mirror list exists.
-    pub direct_urls: &'static [&'static str],
+    pub direct_urls: Vec<String>,
     /// Expected SHA-1 of the downloaded archive (40 hex chars, or all-zero placeholder).
-    pub sha1: &'static str,
+    pub sha1: String,
     /// BitTorrent info hash (hex) for P2P download. Empty if no torrent available.
-    pub info_hash: &'static str,
+    pub info_hash: String,
     /// Well-known tracker URLs for BitTorrent downloads.
-    pub trackers: &'static [&'static str],
+    pub trackers: Vec<String>,
+    /// BEP 19 web seed URLs — HTTP mirrors that participate as seeds in the
+    /// torrent swarm. Each URL points to the complete archive file. Torrent
+    /// clients use HTTP Range requests to fetch individual pieces, treating
+    /// these as always-available, never-choked peers with 100% of all pieces.
+    ///
+    /// These URLs are embedded in the `.torrent` file's `url-list` field so
+    /// that *any* BEP 19-capable client (not just ours) can use them.
+    /// At runtime, the coordinator also treats dynamically-resolved mirror
+    /// list URLs as additional web seed peers.
+    pub web_seeds: Vec<String>,
     /// Which packages installing this download provides.
-    pub provides: &'static [PackageId],
+    pub provides: Vec<PackageId>,
     /// Format hint for extraction: "zip", "iso", "raw", etc.
-    pub format: &'static str,
+    pub format: String,
     /// Approximate download size in bytes (for progress display, 0 if unknown).
     pub size_hint: u64,
 }
 
 impl DownloadPackage {
     /// Returns `true` if this download has at least one reachable source
-    /// (mirror list URL, direct URL, or torrent info hash).
+    /// (mirror list URL, direct URL, web seed, or torrent info hash).
     pub fn is_available(&self) -> bool {
         !self.mirror_list_url.is_empty()
             || !self.direct_urls.is_empty()
+            || !self.web_seeds.is_empty()
             || !self.info_hash.is_empty()
     }
 }

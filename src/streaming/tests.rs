@@ -6,6 +6,7 @@
 
 use super::*;
 use std::io::{self, Read, Seek, SeekFrom};
+use std::time::Duration;
 
 // ── ByteRange ────────────────────────────────────────────────────
 
@@ -465,6 +466,7 @@ fn notifier_threaded_streaming() {
         min_prebuffer: 0,
         target_prebuffer: 0,
         read_timeout: Duration::from_secs(5),
+        ..Default::default()
     };
 
     let (mut reader, notifier) = StreamingReader::new_streaming(&path, range_map, policy).unwrap();
@@ -521,6 +523,7 @@ fn notifier_cancel_wakes_reader() {
         min_prebuffer: 0,
         target_prebuffer: 0,
         read_timeout: Duration::from_secs(30),
+        ..Default::default()
     };
 
     let (mut reader, notifier) = StreamingReader::new_streaming(&path, range_map, policy).unwrap();

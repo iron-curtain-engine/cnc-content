@@ -193,13 +193,13 @@ impl TorrentDownloader {
         let mut magnet = format!("magnet:?xt=urn:btih:{}", package.info_hash);
         // Add display name for tracker announces.
         magnet.push_str("&dn=");
-        magnet.push_str(&urlencoding::encode(package.title));
+        magnet.push_str(&urlencoding::encode(&package.title));
 
         let public_trackers: Vec<&str> = crate::public_trackers().collect();
         for tracker in package
             .trackers
             .iter()
-            .copied()
+            .map(String::as_str)
             .chain(public_trackers.iter().copied())
         {
             magnet.push_str("&tr=");
@@ -305,6 +305,157 @@ pub fn should_use_p2p(package: &crate::DownloadPackage) -> bool {
         return false;
     }
     package.size_hint >= 5_000_000
+}
+
+// ── Coordinator integration ─────────────────────────────────────────
+
+/// A running librqbit session with resolved torrent metadata, ready to
+/// hand off to the [`PieceCoordinator`](crate::coordinator::PieceCoordinator).
+///
+/// After `resolve_and_start` returns:
+/// - librqbit is downloading in the background (BT peers, DHT, trackers)
+/// - Metadata (piece hashes, piece lengths) is available
+/// - The caller builds a coordinator with [`BtSwarmPeer`](crate::coordinator::btswarm::BtSwarmPeer)
+///   + [`WebSeedPeer`](crate::coordinator::webseed::WebSeedPeer) instances
+pub struct ResolvedTorrent {
+    /// Torrent metadata for the coordinator (piece length, piece SHA-1 hashes, file size).
+    pub info: crate::coordinator::TorrentInfo,
+    /// Tokio runtime — must remain alive while the session is active.
+    pub runtime: Arc<tokio::runtime::Runtime>,
+    /// librqbit session — must remain alive while BtSwarmPeer observes the output file.
+    pub session: Arc<librqbit::Session>,
+    /// Path where librqbit is writing the downloaded file.
+    /// The coordinator reads from this file via BtSwarmPeer.
+    pub librqbit_output: PathBuf,
+}
+
+/// Resolves a magnet URI and starts downloading, returning metadata for the coordinator.
+///
+/// ## What happens
+///
+/// 1. Creates a librqbit session (trackers, DHT, incoming port).
+/// 2. Adds the magnet URI — librqbit resolves metadata from DHT/trackers.
+///    Metadata includes the pieces (SHA-1 hashes) and file info.
+/// 3. librqbit begins downloading in the background immediately.
+/// 4. Returns `ResolvedTorrent` with the extracted metadata + live session.
+///
+/// The caller then builds a `PieceCoordinator` with `BtSwarmPeer` (wrapping
+/// the running session) and `WebSeedPeer` instances (from `web_seeds` +
+/// resolved mirror URLs), and runs the coordinator to completion.
+///
+/// After the coordinator finishes, the caller should drop the `ResolvedTorrent`
+/// to shut down the librqbit session (unless seeding is desired).
+pub fn resolve_and_start(
+    package: &crate::DownloadPackage,
+    config: &TorrentConfig,
+) -> Result<ResolvedTorrent, TorrentError> {
+    if package.info_hash.is_empty() {
+        return Err(TorrentError::NoTorrentMetadata);
+    }
+
+    std::fs::create_dir_all(&config.session_dir)?;
+    std::fs::create_dir_all(&config.archive_dir)?;
+
+    // ── Build tokio runtime and librqbit session ────────────────────
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(2)
+        .build()
+        .map_err(|e| TorrentError::Session {
+            message: e.to_string(),
+        })?;
+
+    let session = runtime.block_on(async {
+        let session_opts = librqbit::SessionOptions {
+            disable_dht: !config.enable_dht,
+            listen_port_range: Some(config.listen_port..config.listen_port + 100),
+            ..Default::default()
+        };
+
+        librqbit::Session::new_with_opts(config.session_dir.clone(), session_opts)
+            .await
+            .map_err(|e| TorrentError::Session {
+                message: e.to_string(),
+            })
+    })?;
+
+    // ── Build magnet URI from info hash + trackers ──────────────────
+    let mut magnet = format!("magnet:?xt=urn:btih:{}", package.info_hash);
+    magnet.push_str("&dn=");
+    magnet.push_str(&urlencoding::encode(&package.title));
+
+    let public_trackers: Vec<&str> = crate::public_trackers().collect();
+    for tracker in package
+        .trackers
+        .iter()
+        .map(String::as_str)
+        .chain(public_trackers.iter().copied())
+    {
+        magnet.push_str("&tr=");
+        magnet.push_str(&urlencoding::encode(tracker));
+    }
+
+    // ── Add magnet to session — resolves metadata + starts downloading ──
+    //
+    // librqbit resolves the metadata (piece hashes, file info) from
+    // DHT/trackers before returning the handle. Once add_torrent returns,
+    // metadata IS available and pieces are downloading in the background.
+    let output_dir = config.archive_dir.clone();
+    let handle = runtime.block_on(async {
+        let add_opts = librqbit::AddTorrentOptions {
+            output_folder: Some(output_dir.to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+
+        let resp = session
+            .add_torrent(librqbit::AddTorrent::from_url(&magnet), Some(add_opts))
+            .await
+            .map_err(|e| TorrentError::Download {
+                message: e.to_string(),
+            })?;
+
+        resp.into_handle().ok_or_else(|| TorrentError::Download {
+            message: "failed to get torrent handle after adding magnet".into(),
+        })
+    })?;
+
+    // ── Extract metadata into coordinator::TorrentInfo ──────────────
+    //
+    // At this point, metadata is resolved (add_torrent blocks until
+    // metadata is available for magnet URIs). We extract piece hashes,
+    // piece length, file size, and file name for the coordinator.
+    let (info, librqbit_output) = handle
+        .with_metadata(|meta| {
+            let piece_hashes = meta.info.pieces.as_ref().to_vec();
+            let piece_length = meta.info.piece_length as u64;
+            let file_size = meta.lengths.total_length();
+            let file_name = meta
+                .name
+                .clone()
+                .unwrap_or_else(|| package.title.to_string());
+
+            let torrent_info = crate::coordinator::TorrentInfo {
+                piece_length,
+                piece_hashes,
+                file_size,
+                file_name: file_name.clone(),
+            };
+
+            // librqbit writes the file to output_dir/file_name.
+            let output_path = output_dir.join(&file_name);
+
+            (torrent_info, output_path)
+        })
+        .map_err(|e| TorrentError::Download {
+            message: format!("failed to read torrent metadata: {e}"),
+        })?;
+
+    Ok(ResolvedTorrent {
+        info,
+        runtime: Arc::new(runtime),
+        session,
+        librqbit_output,
+    })
 }
 
 fn default_session_dir() -> PathBuf {

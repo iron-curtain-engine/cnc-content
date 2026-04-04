@@ -66,6 +66,47 @@ source. Works as a standalone CLI tool or as a library for engine integration.
 
 \* Steam app IDs for TS, RA2, and Generals TUC are pending confirmation.
 
+## Freeware Downloads
+
+EA declared Red Alert (2008) and Tiberian Dawn (2007) as freeware. These
+resources are available via HTTP mirrors and BitTorrent. Every magnet link
+includes [BEP 19](https://www.bittorrent.org/beps/bep_0019.html) web seeds
+pointing to the HTTP mirrors — downloads work even with zero BT peers.
+
+### Red Alert
+
+| Package | HTTP | Magnet |
+| ------- | ---- | ------ |
+| Quick Install (Base + Aftermath + Desert) | [OpenRA mirrors](https://www.openra.net/packages/ra-quickinstall-mirrors.txt) | [magnet link](magnet:?xt=urn:btih:dbba9fd4c649c80f8da8fb974c8164a04a66b6b5&dn=ra-quickinstall.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fra-quickinstall.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fra-quickinstall.zip) |
+| Base Game Files | [OpenRA mirrors](https://www.openra.net/packages/ra-base-mirrors.txt) | [magnet link](magnet:?xt=urn:btih:0fdd7c9c0b245912c308aeee249c19c1fae0387e&dn=ra-base.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fra-base.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fra-base.zip) |
+| Aftermath Expansion | [OpenRA mirrors](https://www.openra.net/packages/ra-aftermath-mirrors.txt) | [magnet link](magnet:?xt=urn:btih:93849a7cb08eb72cd5bc164531e58351750c68e6&dn=ra-aftermath.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fra-aftermath.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fra-aftermath.zip) |
+| C&C Desert Tileset | [OpenRA mirrors](https://www.openra.net/packages/ra-cncdesert-mirrors.txt) | [magnet link](magnet:?xt=urn:btih:9f8f5421c244c8737ed33716d740e35a20fc9be3&dn=ra-cncdesert.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fra-cncdesert.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fra-cncdesert.zip) |
+| Full Discs — Allied + Soviet ISOs | [Archive.org](https://archive.org/details/command-and-conquer-red-alert) | [magnet link](magnet:?xt=urn:btih:6585d7f5b81d2a005c196c47bf5972dff9228840&dn=Red+Alert+Full+Discs&tr=http%3A%2F%2Fbt1.archive.org%3A6969%2Fannounce&tr=http%3A%2F%2Fbt2.archive.org%3A6969%2Fannounce) |
+| 4-CD Set — Base + CS + AM | [Archive.org](https://archive.org/details/red_alert_cd) | [magnet link](magnet:?xt=urn:btih:28b589c17d93b06f173a5be9bb7d94ce423ee5eb&dn=Red+Alert+4-CD+Set&tr=http%3A%2F%2Fbt1.archive.org%3A6969%2Fannounce&tr=http%3A%2F%2Fbt2.archive.org%3A6969%2Fannounce) |
+| Music, Movies, Expansion Music | IC-hosted — not yet seeded | — |
+
+### Tiberian Dawn
+
+| Package | HTTP | Magnet |
+| ------- | ---- | ------ |
+| Base Game (MIX files) | [OpenRA mirrors](https://www.openra.net/packages/cnc-mirrors.txt), [CDN 1](https://cdn.mailaender.name/openra/cnc-packages.zip), [CDN 2](https://openra.0x47.net/cnc-packages.zip) | [magnet link](magnet:?xt=urn:btih:82f116c7477005303b78d7797d6ff245b15a1505&dn=cnc-packages.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fcnc-packages.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fcnc-packages.zip) |
+| Covert Operations ISO | [CNCNZ](https://files.cncnz.com/cc1_tiberian_dawn/full_game/CovertOps_ISO.zip) | — |
+| GDI + Nod Disc ISOs | [CNCNZ GDI](https://files.cncnz.com/cc1_tiberian_dawn/full_game/GDI95.zip), [CNCNZ Nod](https://files.cncnz.com/cc1_tiberian_dawn/full_game/NOD95.zip), [Archive.org](https://archive.org/details/cnc-dos-eng-v-1.22) | [magnet link](magnet:?xt=urn:btih:8f430be74dee33f9d76f72b50bbf2a537c442794&dn=Tiberian+Dawn+Disc+ISOs&tr=http%3A%2F%2Fbt1.archive.org%3A6969%2Fannounce&tr=http%3A%2F%2Fbt2.archive.org%3A6969%2Fannounce) |
+| Music, Movies | IC-hosted — not yet seeded | — |
+
+Magnet links with `&ws=` parameters use the HTTP mirrors as
+[BEP 19 web seeds](https://www.bittorrent.org/beps/bep_0019.html). Any
+BitTorrent client supporting BEP 19 will download directly from the mirrors
+via HTTP Range requests while simultaneously sharing pieces with other peers.
+
+> IC-hosted content (music, movies, expansion music) requires the
+> `content-bootstrap` [operations pipeline](AGENTS.md#p2p-content-pipeline-gap)
+> to be completed before magnet links and downloads are available.
+>
+> **Dune 2, Dune 2000, Tiberian Sun, Red Alert 2, and Generals** are
+> NOT freeware. This crate supports local source extraction only for those
+> games — users must provide their own legally-obtained copies.
+
 ## Installation
 
 Install from source with Cargo:

@@ -14,6 +14,14 @@ use crate::{
     DownloadPackage, GameId, InstallRecipe, PackageId, SourceId,
 };
 
+use std::sync::LazyLock;
+
+/// Cached download list — parsed once from `data/downloads.toml` and sorted
+/// for consistent iteration order. Stored separately from the downloads module
+/// so query functions can return `&'static` references.
+static ALL_DOWNLOADS_CACHE: LazyLock<&'static [DownloadPackage]> =
+    LazyLock::new(downloads::all_downloads);
+
 // ── ID lookups ────────────────────────────────────────────────────────────
 
 /// Lookup a content package definition by ID.
@@ -28,7 +36,7 @@ pub fn source(id: SourceId) -> Option<&'static ContentSource> {
 
 /// Lookup an HTTP download definition by ID.
 pub fn download(id: DownloadId) -> Option<&'static DownloadPackage> {
-    downloads::ALL_DOWNLOADS.iter().find(|d| d.id == id)
+    ALL_DOWNLOADS_CACHE.iter().find(|d| d.id == id)
 }
 
 /// Lookup an install recipe for a source/package combination.
@@ -58,7 +66,7 @@ pub fn packages_for_game(game: GameId) -> Vec<&'static ContentPackage> {
 
 /// Returns all downloads for a specific game.
 pub fn downloads_for_game(game: GameId) -> Vec<&'static DownloadPackage> {
-    downloads::ALL_DOWNLOADS
+    ALL_DOWNLOADS_CACHE
         .iter()
         .filter(|d| d.game == game)
         .collect()

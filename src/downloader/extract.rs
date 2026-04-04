@@ -96,7 +96,7 @@ fn extract_iso_via_recipes(
             // Can't identify — try all sources that provide the packages
             // this download covers. Use the first one that has recipes.
             let mut found = None;
-            for &pkg_id in package.provides {
+            for &pkg_id in &package.provides {
                 let pkg = crate::package(pkg_id).ok_or_else(|| DownloadError::Io {
                     source: io::Error::other(format!("no package definition for {pkg_id:?}")),
                 })?;
@@ -118,7 +118,7 @@ fn extract_iso_via_recipes(
     };
 
     let mut files = 0;
-    for &pkg_id in package.provides {
+    for &pkg_id in &package.provides {
         if let Some(recipe) = crate::recipe(source_id, pkg_id) {
             on_progress(DownloadProgress::Extracting {
                 entry: format!(

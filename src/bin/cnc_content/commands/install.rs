@@ -47,8 +47,8 @@ pub fn cmd_download(
             std::process::exit(1);
         });
         let strategy = cnc_content::downloader::select_strategy(pkg);
-        progress::print_section_header(pkg.title, &format!("{strategy:?}"));
-        let mut display = progress::ProgressDisplay::new(pkg.title);
+        progress::print_section_header(&pkg.title, &format!("{strategy:?}"));
+        let mut display = progress::ProgressDisplay::new(&pkg.title);
         if let Err(e) = cnc_content::downloader::download_and_install(
             pkg,
             content_root,
@@ -101,13 +101,13 @@ pub fn cmd_download(
             });
 
             if already_installed {
-                progress::print_already_installed(dl.title);
+                progress::print_already_installed(&dl.title);
                 continue;
             }
 
             let strategy = cnc_content::downloader::select_strategy(dl);
-            progress::print_section_header(dl.title, &format!("{strategy:?}"));
-            let mut display = progress::ProgressDisplay::new(dl.title);
+            progress::print_section_header(&dl.title, &format!("{strategy:?}"));
+            let mut display = progress::ProgressDisplay::new(&dl.title);
             match cnc_content::downloader::download_and_install(
                 dl,
                 content_root,
@@ -116,7 +116,7 @@ pub fn cmd_download(
             ) {
                 Ok(()) => {}
                 Err(e) => {
-                    progress::print_download_warning(dl.title, &e.to_string());
+                    progress::print_download_warning(&dl.title, &e.to_string());
                 }
             }
         }
@@ -344,7 +344,7 @@ pub fn cmd_clean(content_root: &std::path::Path, skip_confirm: bool) {
 }
 
 pub fn cmd_torrent_create(output_dir: Option<&std::path::Path>, game_filter: Option<&str>) {
-    use cnc_content::torrent_create::{create_torrent, DEFAULT_PIECE_LENGTH};
+    use cnc_content::torrent_create::{create_torrent, recommended_piece_length};
 
     let filter_game = game_filter.and_then(GameId::from_slug);
     if let Some(filter_str) = game_filter {
@@ -365,7 +365,7 @@ pub fn cmd_torrent_create(output_dir: Option<&std::path::Path>, game_filter: Opt
 
     println!("Generating .torrent files...\n");
 
-    for dl in cnc_content::downloads::ALL_DOWNLOADS {
+    for dl in cnc_content::downloads::all_downloads() {
         if let Some(game) = filter_game {
             if dl.game != game {
                 continue;
@@ -402,7 +402,12 @@ pub fn cmd_torrent_create(output_dir: Option<&std::path::Path>, game_filter: Opt
             println!("  Using cached {:?} at {}", dl.id, zip_path.display());
         }
 
-        match create_torrent(&zip_path, DEFAULT_PIECE_LENGTH, &trackers) {
+        // Select piece length based on D049 size-tier strategy.
+        let file_size = std::fs::metadata(&zip_path).map(|m| m.len()).unwrap_or(0);
+        let piece_length = recommended_piece_length(file_size);
+
+        let web_seed_strs: Vec<&str> = dl.web_seeds.iter().map(String::as_str).collect();
+        match create_torrent(&zip_path, piece_length, &trackers, &web_seed_strs) {
             Ok(meta) => {
                 // Write .torrent file.
                 let torrent_name = file_name.replace(".zip", ".torrent");
@@ -542,7 +547,7 @@ fn download_to_file(
     // Resolve URLs — try mirror list first, then direct URLs.
     let urls = if !dl.mirror_list_url.is_empty() {
         // Fetch mirror list.
-        match ureq::get(dl.mirror_list_url).call() {
+        match ureq::get(&dl.mirror_list_url).call() {
             Ok(response) => {
                 let body = response
                     .into_body()

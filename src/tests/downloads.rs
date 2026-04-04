@@ -150,7 +150,7 @@ fn sha1_hashes_are_lowercase_hex() {
 /// when parsed.
 #[test]
 fn download_sha1_hashes_are_valid_hex() {
-    for dl in downloads::ALL_DOWNLOADS {
+    for dl in downloads::all_downloads() {
         assert_eq!(
             dl.sha1.len(),
             40,
@@ -213,8 +213,8 @@ fn every_package_download_exists() {
 /// hiding downloads in the wrong context.
 #[test]
 fn download_game_matches_package_game() {
-    for dl in downloads::ALL_DOWNLOADS {
-        for &pkg_id in dl.provides {
+    for dl in downloads::all_downloads() {
+        for &pkg_id in &dl.provides {
             let pkg = package(pkg_id).unwrap();
             assert_eq!(
                 dl.game, pkg.game,
@@ -552,7 +552,7 @@ fn downloads_for_game_returns_correct_counts() {
 #[test]
 fn available_downloads_have_urls() {
     // Downloads with is_available() == true must have at least one source.
-    for dl in downloads::ALL_DOWNLOADS {
+    for dl in downloads::all_downloads() {
         if dl.is_available() {
             let has_mirrors = !dl.mirror_list_url.is_empty();
             let has_direct = !dl.direct_urls.is_empty();
@@ -574,7 +574,7 @@ fn available_downloads_have_urls() {
 #[test]
 fn unavailable_downloads_have_no_urls() {
     // Downloads not yet available should have all URL fields empty.
-    for dl in downloads::ALL_DOWNLOADS {
+    for dl in downloads::all_downloads() {
         if !dl.is_available() {
             assert!(
                 dl.mirror_list_url.is_empty()
@@ -605,7 +605,7 @@ fn download_urls_use_known_live_domains() {
         "archive.org",
     ];
 
-    for dl in downloads::ALL_DOWNLOADS {
+    for dl in downloads::all_downloads() {
         if !dl.mirror_list_url.is_empty() {
             assert!(
                 known_domains.iter().any(|d| dl.mirror_list_url.contains(d)),
@@ -614,7 +614,7 @@ fn download_urls_use_known_live_domains() {
                 dl.mirror_list_url,
             );
         }
-        for url in dl.direct_urls {
+        for url in &dl.direct_urls {
             assert!(
                 known_domains.iter().any(|d| url.contains(d)),
                 "Download {:?} direct_url uses unknown domain: {}",
@@ -804,7 +804,7 @@ fn seeding_policy_label_non_empty() {
 fn select_strategy_http_for_no_info_hash() {
     use crate::downloader::{select_strategy, DownloadStrategy};
     // Packages without info_hash should use HTTP strategy.
-    for dl in downloads::ALL_DOWNLOADS {
+    for dl in downloads::all_downloads() {
         if dl.info_hash.is_empty() {
             assert_eq!(
                 select_strategy(dl),

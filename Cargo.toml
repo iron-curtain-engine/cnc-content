@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2025–present Iron Curtain contributors
 
+[workspace]
+members = ["crates/p2p-distribute"]
+
 [package]
 name = "cnc-content"
 version = "0.1.0-alpha.0"
@@ -34,9 +37,10 @@ serde = { version = "1", features = ["derive"] }
 sha1 = "0.11"
 sha2 = "0.11"
 flate2 = "1"
+p2p-distribute = { path = "crates/p2p-distribute" }
 strict-path = "0.1"
 thiserror = "2.0"
-toml = "1.1.1"
+toml = "1.1.2"
 
 # CLI-only deps
 clap = { version = "4", features = ["derive", "env"], optional = true }
