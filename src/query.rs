@@ -39,6 +39,14 @@ pub fn download(id: DownloadId) -> Option<&'static DownloadPackage> {
     ALL_DOWNLOADS_CACHE.iter().find(|d| d.id == id)
 }
 
+/// Returns the embedded `.torrent` file bytes for a download package, or
+/// `None` if no `.torrent` has been generated yet.
+///
+/// Thin re-export of [`downloads::embedded_torrent`] for crate-root access.
+pub fn embedded_torrent(id: DownloadId) -> Option<&'static [u8]> {
+    downloads::embedded_torrent(id)
+}
+
 /// Lookup an install recipe for a source/package combination.
 pub fn recipe(source: SourceId, package: PackageId) -> Option<&'static InstallRecipe> {
     recipes::ALL_RECIPES

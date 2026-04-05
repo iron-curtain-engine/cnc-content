@@ -206,6 +206,8 @@ Treat feedback as input, not instruction. Validate every claim before acting.
 ```
 data/
   trackers.txt        — BitTorrent tracker announce URLs (include_str!)
+  downloads.toml      — Download manifest (include_str! + LazyLock TOML parse)
+  torrents/           — Pre-generated .torrent files (include_bytes!)
 src/
   lib.rs              — crate root, core types (GameId, PackageId, SeedingPolicy, etc.)
   query.rs            — convenience lookup/filter functions (re-exported from lib.rs)
@@ -315,7 +317,9 @@ Current external files:
 
 ```
 data/
-  trackers.txt — BitTorrent tracker announce URLs (5 trackers)
+  trackers.txt   — BitTorrent tracker announce URLs (5 trackers)
+  downloads.toml — Download manifest (18 packages, include_str! + LazyLock)
+  torrents/      — Pre-generated .torrent files (8 files, include_bytes!)
 ```
 
 ### When NOT to use `include_str!`
@@ -849,7 +853,7 @@ populated yet) but the files and URLs must exist.
 - HTTP downloader: **complete** (parallel mirror racing + SHA-1 verification)
 - Content verification: **complete** (SHA-256 manifest generation + verification)
 - Source probes: **complete** (Steam VDF, Origin/EA App, GOG Galaxy/classic, Windows registry, OpenRA, disc/ISO)
-- P2P distribution: **code complete, content pending** (torrent.rs with librqbit behind `torrent` feature flag; all `info_hash` fields are empty — see "P2P Content Pipeline Gap" below)
+- P2P distribution: **partially seeded** (torrent.rs with librqbit behind `torrent` feature flag; 8 of 18 packages have embedded `.torrent` files with BEP 19 web seeds — see "P2P Content Pipeline Gap" below)
 - Parallel downloads: **complete** (multi-mirror racing via thread pool; single-URL fast path)
 - InstallShield CAB: **complete** (iscab.rs reader for v5/v6 archives, zlib decompression)
 - Setup wizard UI: lives in ic-game, not this crate
@@ -859,31 +863,81 @@ populated yet) but the files and URLs must exist.
 
 The torrent code (`torrent.rs`) is feature-complete: magnet URI construction,
 `librqbit` session management, public tracker list from `data/trackers.txt`,
-size-based transport selection (D049 strategy). **However, no packages have
-`info_hash` values populated** — all are empty strings.
+size-based transport selection (D049 strategy).
 
-Closing this gap requires an **operations pipeline**, not more Rust code:
+**Current state:** 8 of 18 packages have populated `info_hash` values and
+embedded `.torrent` files (4 RA + 4 TD). The remaining 10 are either
+Archive.org-hosted (use their own torrents) or IC-hosted (mirror
+infrastructure not yet live).
 
-1. **Build content ZIPs** — for each `DownloadPackage`, assemble the
-   exact files it provides into a deterministic ZIP archive.
-2. **Generate `.torrent` files** — hash each ZIP into a `.torrent` with
-   piece length, info hash, and the public trackers from
-   `data/trackers.txt`.
-3. **Record info hashes** — populate the `info_hash: ""` fields in
-   `downloads.rs` with the hex-encoded BitTorrent v1 info hashes.
-4. **Seed** — upload the `.torrent` files and start seeding from at
-   least one reliable host.
-5. **Verify** — confirm that `TorrentDownloader::download_package()`
-   resolves the magnet URI, finds peers, downloads, and passes SHA-256
-   verification.
+### Embedded `.torrent` Files
 
-Until this pipeline runs, all downloads use HTTP mirrors only. The
-`should_use_p2p()` function returns `false` for every package because
-`info_hash` is empty.
+Pre-generated `.torrent` files are stored in `data/torrents/` and embedded
+at compile time via `include_bytes!` in `src/downloads.rs`. Each file
+contains:
 
-**IC-hosted content** (RA music, movies, expansion music) additionally
-requires the `content-bootstrap` repo's mirror list files to be populated
-with actual mirror URLs. Currently these mirror lists are empty files.
+- Full BitTorrent metadata (piece hashes, file size, name)
+- BEP 19 `url-list` web seed URLs pointing to HTTP mirrors
+- Public tracker announce URLs from `data/trackers.txt`
+
+This means downloads work with **zero BitTorrent peers** — BT clients
+fetch pieces directly from HTTP mirrors via Range requests. As users
+share the torrent, pieces flow via P2P too, reducing mirror load.
+
+Access via: `cnc_content::embedded_torrent(id)` → `Option<&'static [u8]>`.
+
+### Torrent Generation Workflow
+
+To add or update `.torrent` files:
+
+1. **Ensure mirrors are live** — every URL in the package's `web_seeds`
+   field must serve the exact file that will be hashed. BEP 19 web seeds
+   must be byte-identical to the torrent content.
+
+2. **Generate `.torrent` files:**
+   ```sh
+   cargo run --release -- torrent-create --output data/torrents
+   ```
+   This downloads each available package, hashes pieces, embeds web seeds
+   and trackers, and writes `.torrent` files.
+
+3. **Copy to docs for GitHub Pages:**
+   ```sh
+   cp data/torrents/*.torrent docs/torrents/
+   ```
+
+4. **Update `data/downloads.toml`** — set the `info_hash` field for each
+   package to the hex-encoded SHA-1 of the torrent's info dictionary
+   (printed by `torrent-create`).
+
+5. **Add `include_bytes!` entry** — in `src/downloads.rs`, add a match
+   arm in `embedded_torrent()` for the new `DownloadId`.
+
+6. **Update tests** — add the new `DownloadId` to the
+   `embedded_torrent_present_for_generated_packages` test in
+   `src/tests/downloads.rs`.
+
+7. **Verify:**
+   ```sh
+   cargo test
+   cargo clippy --all-features --tests -- -D warnings
+   cargo fmt --check
+   ```
+
+### Web Seed Correctness Rule
+
+**BEP 19 web seeds must serve byte-identical content to the torrent.**
+If a package has multiple `direct_urls` that serve different file formats
+(e.g. ZIP vs ISO), only the URL whose output was hashed into the torrent
+may appear in `web_seeds`. Mismatched URLs cause piece verification
+failures in BT clients.
+
+### Remaining Pipeline Work
+
+**IC-hosted content** (RA music, movies, expansion music) requires the
+`content-bootstrap` repo's mirror list files to be populated with actual
+mirror URLs before torrents can be generated. Currently these mirror
+lists return 404.
 
 ## Execution Overlay Mapping
 

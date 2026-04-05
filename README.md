@@ -69,20 +69,23 @@ source. Works as a standalone CLI tool or as a library for engine integration.
 ## Freeware Downloads
 
 EA declared Red Alert (2008) and Tiberian Dawn (2007) as freeware. These
-resources are available via HTTP mirrors and BitTorrent. Every magnet link
-includes [BEP 19](https://www.bittorrent.org/beps/bep_0019.html) web seeds
-(`&ws=`) pointing to HTTP mirrors — downloads work even with zero BT peers.
+resources are available via HTTP mirrors and BitTorrent.
+
+Every `.torrent` file embeds [BEP 19](https://www.bittorrent.org/beps/bep_0019.html)
+web seed URLs pointing to the HTTP mirrors. Downloads work **with zero
+BitTorrent peers** — the BT client fetches pieces directly from the mirrors
+via HTTP Range requests.
 
 ### Red Alert
 
-| Package | Size | HTTP | Magnet |
-| ------- | ---: | ---- | ------ |
-| Quick Install (Base + AM + Desert) | ~18 MB | [OpenRA mirrors][ra-qi-http] | [magnet][ra-qi-magnet] |
-| Base Game Files | ~12 MB | [OpenRA mirrors][ra-base-http] | [magnet][ra-base-magnet] |
-| Aftermath Expansion | ~4 MB | [OpenRA mirrors][ra-am-http] | [magnet][ra-am-magnet] |
-| C&C Desert Tileset | ~1.5 MB | [OpenRA mirrors][ra-desert-http] | [magnet][ra-desert-magnet] |
-| Full Discs — Allied + Soviet ISOs | ~1.3 GB | [Archive.org][ra-full-http] | [magnet][ra-full-magnet] |
-| 4-CD Set — Base + CS + AM | ~1.9 GB | [Archive.org][ra-set-http] | [magnet][ra-set-magnet] |
+| Package | Size | HTTP | Torrent |
+| ------- | ---: | ---- | ------- |
+| Quick Install (Base + AM + Desert) | ~13 MB | [OpenRA mirrors][ra-qi-http] | [.torrent][ra-qi-torrent] |
+| Base Game Files | ~12 MB | [OpenRA mirrors][ra-base-http] | [.torrent][ra-base-torrent] |
+| Aftermath Expansion | ~639 KB | [OpenRA mirrors][ra-am-http] | [.torrent][ra-am-torrent] |
+| C&C Desert Tileset | ~347 KB | [OpenRA mirrors][ra-desert-http] | [.torrent][ra-desert-torrent] |
+| Full Discs — Allied + Soviet ISOs | ~1.3 GB | [Archive.org][ra-full-http] | [.torrent][ra-full-torrent] |
+| 4-CD Set — Base + CS + AM | ~1.9 GB | [Archive.org][ra-set-http] | [.torrent][ra-set-torrent] |
 | Music (scores.mix) | ~50 MB | [mirror list][ra-music-http] | — |
 | Allied Campaign Movies | ~300 MB | [mirror list][ra-movies-a-http] | — |
 | Soviet Campaign Movies | ~350 MB | [mirror list][ra-movies-s-http] | — |
@@ -91,20 +94,23 @@ includes [BEP 19](https://www.bittorrent.org/beps/bep_0019.html) web seeds
 
 ### Tiberian Dawn
 
-| Package | Size | HTTP | Magnet |
-| ------- | ---: | ---- | ------ |
-| Base Game (MIX files) | ~15 MB | [OpenRA mirrors][td-base-http] · [CDN 1][td-cdn1] · [CDN 2][td-cdn2] | [magnet][td-base-magnet] |
-| GDI + Nod Disc ISOs | ~1.2 GB | [CNCNZ GDI][td-gdi-http] · [CNCNZ Nod][td-nod-http] · [Archive.org][td-disc-archive] | [magnet][td-disc-magnet] |
-| Covert Operations ISO | ~309 MB | [CNCNZ][td-covert-http] | — |
+| Package | Size | HTTP | Torrent |
+| ------- | ---: | ---- | ------- |
+| Base Game (MIX files) | ~7.5 MB | [OpenRA mirrors][td-base-http] · [CDN 1][td-cdn1] · [CDN 2][td-cdn2] | [.torrent][td-base-torrent] |
+| GDI Disc ISO | ~581 MB | [CNCNZ][td-gdi-http] · [Archive.org][td-disc-archive] | [.torrent][td-gdi-torrent] |
+| Nod Disc ISO | ~565 MB | [CNCNZ][td-nod-http] · [Archive.org][td-disc-archive] | [.torrent][td-nod-torrent] |
+| Covert Operations ISO | ~239 MB | [CNCNZ][td-covert-http] | [.torrent][td-covert-torrent] |
 | Music | ~40 MB | [mirror list][td-music-http] | — |
 | GDI Campaign Movies | ~250 MB | [mirror list][td-movies-gdi-http] | — |
 | Nod Campaign Movies | ~250 MB | [mirror list][td-movies-nod-http] | — |
 
-Magnet URIs with `&ws=` use HTTP mirrors as
-[BEP 19 web seeds](https://www.bittorrent.org/beps/bep_0019.html) — BT
-clients download via HTTP Range requests while sharing pieces with peers.
-Packages showing "—" need `cnc-content torrent-create` run after the content
-ZIP is built. See the [content pipeline](AGENTS.md#p2p-content-pipeline-gap).
+Every `.torrent` file contains [BEP 19](https://www.bittorrent.org/beps/bep_0019.html)
+web seed URLs. Open the `.torrent` in any BT client — it downloads via HTTP
+mirrors immediately, no peers required. As the swarm grows, peers share
+pieces with each other automatically.
+
+Packages showing "—" need their mirror infrastructure set up first.
+See the [content pipeline](AGENTS.md#p2p-content-pipeline-gap).
 
 > **Dune 2, Dune 2000, Tiberian Sun, Red Alert 2, and Generals** are
 > NOT freeware. This crate supports local source extraction only for those
@@ -135,17 +141,23 @@ ZIP is built. See the [content pipeline](AGENTS.md#p2p-content-pipeline-gap).
 [td-movies-gdi-http]: https://raw.githubusercontent.com/iron-curtain-engine/content-bootstrap/main/mirrors/td-movies-gdi.txt
 [td-movies-nod-http]: https://raw.githubusercontent.com/iron-curtain-engine/content-bootstrap/main/mirrors/td-movies-nod.txt
 
-<!-- ── Magnet reference links — GitHub Pages redirect for clickability -->
-<!-- GitHub strips magnet: hrefs, so we redirect through docs/magnets/*.html -->
+<!-- ── Torrent file reference links ────────────────────────────────── -->
+<!-- Our generated .torrent files (GitHub Pages) contain BEP 19 web seeds -->
+<!-- so downloads work with zero BT peers via HTTP Range requests.        -->
 
-[ra-qi-magnet]: https://iron-curtain-engine.github.io/cnc-content/magnets/ra-quickinstall.html
-[ra-base-magnet]: https://iron-curtain-engine.github.io/cnc-content/magnets/ra-base.html
-[ra-am-magnet]: https://iron-curtain-engine.github.io/cnc-content/magnets/ra-aftermath.html
-[ra-desert-magnet]: https://iron-curtain-engine.github.io/cnc-content/magnets/ra-cncdesert.html
-[ra-full-magnet]: https://iron-curtain-engine.github.io/cnc-content/magnets/ra-full-discs.html
-[ra-set-magnet]: https://iron-curtain-engine.github.io/cnc-content/magnets/ra-4cd-set.html
-[td-base-magnet]: https://iron-curtain-engine.github.io/cnc-content/magnets/td-base.html
-[td-disc-magnet]: https://iron-curtain-engine.github.io/cnc-content/magnets/td-disc-isos.html
+[ra-qi-torrent]: https://iron-curtain-engine.github.io/cnc-content/torrents/raquickinstall.torrent
+[ra-base-torrent]: https://iron-curtain-engine.github.io/cnc-content/torrents/rabasefiles.torrent
+[ra-am-torrent]: https://iron-curtain-engine.github.io/cnc-content/torrents/raaftermath.torrent
+[ra-desert-torrent]: https://iron-curtain-engine.github.io/cnc-content/torrents/racncdesert.torrent
+[td-base-torrent]: https://iron-curtain-engine.github.io/cnc-content/torrents/tdbasefiles.torrent
+[td-gdi-torrent]: https://iron-curtain-engine.github.io/cnc-content/torrents/tdgdiiso.torrent
+[td-nod-torrent]: https://iron-curtain-engine.github.io/cnc-content/torrents/tdnodiso.torrent
+[td-covert-torrent]: https://iron-curtain-engine.github.io/cnc-content/torrents/tdcovertops.torrent
+
+<!-- Archive.org .torrent files (hosted by Archive.org, actively seeded) -->
+
+[ra-full-torrent]: https://archive.org/download/command-and-conquer-red-alert/command-and-conquer-red-alert_archive.torrent
+[ra-set-torrent]: https://archive.org/download/red_alert_cd/red_alert_cd_archive.torrent
 
 ## Installation
 

@@ -352,7 +352,9 @@ direct_urls = [
     "https://files.cncnz.com/cc1_tiberian_dawn/full_game/CovertOps_ISO.zip",
 ]
 sha1 = "0000000000000000000000000000000000000000"
-info_hash = ""
+# Generated from downloaded file via torrent_create::create_torrent()
+# with recommended_piece_length(250_097_664) = 1 MiB, 239 pieces.
+info_hash = "06acace29fa38801fafe0a6801582f0960dad342"
 trackers = []
 # CNCNZ supports HTTP Range — acts as a web seed for the torrent swarm.
 web_seeds = [
@@ -381,17 +383,14 @@ direct_urls = [
     "https://archive.org/download/cnc-dos-eng-v-1.22/C%26C%20DOS%20ENG%20v1.22%20Disk%201%20-%20GDI.iso",
 ]
 sha1 = "0000000000000000000000000000000000000000"
-# Archive.org item btih — seeded via Archive.org webseed infra.
-info_hash = "8f430be74dee33f9d76f72b50bbf2a537c442794"
-trackers = [
-    "http://bt1.archive.org:6969/announce",
-    "http://bt2.archive.org:6969/announce",
-]
-# Archive.org natively supports BEP 19 — direct URLs act as web seeds.
-web_seeds = [
-    "https://files.cncnz.com/cc1_tiberian_dawn/full_game/GDI95.zip",
-    "https://archive.org/download/cnc-dos-eng-v-1.22/C%26C%20DOS%20ENG%20v1.22%20Disk%201%20-%20GDI.iso",
-]
+# Generated from downloaded CNCNZ ZIP via torrent_create::create_torrent()
+# with recommended_piece_length(609_071_104) = 4 MiB, 146 pieces.
+info_hash = "a468dca9ec4a5e9ab1cbe565fee5fe1874f2c693"
+trackers = []
+# BEP 19 web seeds — only URLs whose bytes match the torrent piece hashes.
+# The Archive.org URL serves a raw ISO, not the CNCNZ ZIP that was hashed,
+# so it MUST NOT appear here (piece verification would fail).
+web_seeds = ["https://files.cncnz.com/cc1_tiberian_dawn/full_game/GDI95.zip"]
 provides = ["TdBase", "TdMoviesGdi"]
 format = "zip"
 size_hint = 608_000_000
@@ -406,17 +405,13 @@ direct_urls = [
     "https://archive.org/download/cnc-dos-eng-v-1.22/C%26C%20DOS%20ENG%20v1.22%20Disk%202%20-%20Nod.iso",
 ]
 sha1 = "0000000000000000000000000000000000000000"
-# Same Archive.org item as TdGdiIso — multi-file torrent.
-info_hash = "8f430be74dee33f9d76f72b50bbf2a537c442794"
-trackers = [
-    "http://bt1.archive.org:6969/announce",
-    "http://bt2.archive.org:6969/announce",
-]
-# Archive.org + CNCNZ as BEP 19 web seeds.
-web_seeds = [
-    "https://files.cncnz.com/cc1_tiberian_dawn/full_game/NOD95.zip",
-    "https://archive.org/download/cnc-dos-eng-v-1.22/C%26C%20DOS%20ENG%20v1.22%20Disk%202%20-%20Nod.iso",
-]
+# Generated from downloaded CNCNZ ZIP via torrent_create::create_torrent()
+# with recommended_piece_length(592_564_224) = 4 MiB, 142 pieces.
+info_hash = "eaced0cbc3ef315ccf8254c82b08967cd13ad909"
+trackers = []
+# BEP 19 web seeds — only the CNCNZ ZIP whose bytes match the torrent.
+# The Archive.org ISO is a different format; do not use as web seed.
+web_seeds = ["https://files.cncnz.com/cc1_tiberian_dawn/full_game/NOD95.zip"]
 provides = ["TdBase", "TdMoviesNod"]
 format = "zip"
 size_hint = 608_000_000
