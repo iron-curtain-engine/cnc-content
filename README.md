@@ -135,16 +135,17 @@ ZIP is built. See the [content pipeline](AGENTS.md#p2p-content-pipeline-gap).
 [td-movies-gdi-http]: https://raw.githubusercontent.com/iron-curtain-engine/content-bootstrap/main/mirrors/td-movies-gdi.txt
 [td-movies-nod-http]: https://raw.githubusercontent.com/iron-curtain-engine/content-bootstrap/main/mirrors/td-movies-nod.txt
 
-<!-- ── Magnet reference links (BEP 19 web-seeded) ──────────────────── -->
+<!-- ── Magnet reference links — GitHub Pages redirect for clickability -->
+<!-- GitHub strips magnet: hrefs, so we redirect through docs/magnets/*.html -->
 
-[ra-qi-magnet]: magnet:?xt=urn:btih:dbba9fd4c649c80f8da8fb974c8164a04a66b6b5&dn=ra-quickinstall.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=udp%3A%2F%2Fexplodie.org%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.tiny-vps.com%3A6969%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fra-quickinstall.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fra-quickinstall.zip
-[ra-base-magnet]: magnet:?xt=urn:btih:0fdd7c9c0b245912c308aeee249c19c1fae0387e&dn=ra-base.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=udp%3A%2F%2Fexplodie.org%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.tiny-vps.com%3A6969%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fra-base.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fra-base.zip
-[ra-am-magnet]: magnet:?xt=urn:btih:93849a7cb08eb72cd5bc164531e58351750c68e6&dn=ra-aftermath.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=udp%3A%2F%2Fexplodie.org%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.tiny-vps.com%3A6969%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fra-aftermath.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fra-aftermath.zip
-[ra-desert-magnet]: magnet:?xt=urn:btih:9f8f5421c244c8737ed33716d740e35a20fc9be3&dn=ra-cncdesert.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=udp%3A%2F%2Fexplodie.org%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.tiny-vps.com%3A6969%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fra-cncdesert.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fra-cncdesert.zip
-[ra-full-magnet]: magnet:?xt=urn:btih:6585d7f5b81d2a005c196c47bf5972dff9228840&dn=Red+Alert+Full+Discs&tr=http%3A%2F%2Fbt1.archive.org%3A6969%2Fannounce&tr=http%3A%2F%2Fbt2.archive.org%3A6969%2Fannounce&ws=https%3A%2F%2Farchive.org%2Fdownload%2Fcommand-and-conquer-red-alert%2FCD1_ALLIED_DISC.ISO&ws=https%3A%2F%2Farchive.org%2Fdownload%2Fcommand-and-conquer-red-alert%2FCD2_SOVIET_DISC.ISO
-[ra-set-magnet]: magnet:?xt=urn:btih:28b589c17d93b06f173a5be9bb7d94ce423ee5eb&dn=Red+Alert+4-CD+Set&tr=http%3A%2F%2Fbt1.archive.org%3A6969%2Fannounce&tr=http%3A%2F%2Fbt2.archive.org%3A6969%2Fannounce&ws=https%3A%2F%2Farchive.org%2Fdownload%2Fred_alert_cd%2FCD1_Allies.iso&ws=https%3A%2F%2Farchive.org%2Fdownload%2Fred_alert_cd%2FCD2_Soviet.iso&ws=https%3A%2F%2Farchive.org%2Fdownload%2Fred_alert_cd%2FCD3_Counterstrike.iso&ws=https%3A%2F%2Farchive.org%2Fdownload%2Fred_alert_cd%2FCD4_Aftermath.iso
-[td-base-magnet]: magnet:?xt=urn:btih:82f116c7477005303b78d7797d6ff245b15a1505&dn=cnc-packages.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=udp%3A%2F%2Fexplodie.org%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.tiny-vps.com%3A6969%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fcnc-packages.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fcnc-packages.zip
-[td-disc-magnet]: magnet:?xt=urn:btih:8f430be74dee33f9d76f72b50bbf2a537c442794&dn=Tiberian+Dawn+Disc+ISOs&tr=http%3A%2F%2Fbt1.archive.org%3A6969%2Fannounce&tr=http%3A%2F%2Fbt2.archive.org%3A6969%2Fannounce&ws=https%3A%2F%2Ffiles.cncnz.com%2Fcc1_tiberian_dawn%2Ffull_game%2FGDI95.zip&ws=https%3A%2F%2Ffiles.cncnz.com%2Fcc1_tiberian_dawn%2Ffull_game%2FNOD95.zip
+[ra-qi-magnet]: https://iron-curtain-engine.github.io/cnc-content/magnets/ra-quickinstall.html
+[ra-base-magnet]: https://iron-curtain-engine.github.io/cnc-content/magnets/ra-base.html
+[ra-am-magnet]: https://iron-curtain-engine.github.io/cnc-content/magnets/ra-aftermath.html
+[ra-desert-magnet]: https://iron-curtain-engine.github.io/cnc-content/magnets/ra-cncdesert.html
+[ra-full-magnet]: https://iron-curtain-engine.github.io/cnc-content/magnets/ra-full-discs.html
+[ra-set-magnet]: https://iron-curtain-engine.github.io/cnc-content/magnets/ra-4cd-set.html
+[td-base-magnet]: https://iron-curtain-engine.github.io/cnc-content/magnets/td-base.html
+[td-disc-magnet]: https://iron-curtain-engine.github.io/cnc-content/magnets/td-disc-isos.html
 
 ## Installation
 
