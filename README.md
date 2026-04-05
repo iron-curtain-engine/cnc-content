@@ -71,41 +71,80 @@ source. Works as a standalone CLI tool or as a library for engine integration.
 EA declared Red Alert (2008) and Tiberian Dawn (2007) as freeware. These
 resources are available via HTTP mirrors and BitTorrent. Every magnet link
 includes [BEP 19](https://www.bittorrent.org/beps/bep_0019.html) web seeds
-pointing to the HTTP mirrors — downloads work even with zero BT peers.
+(`&ws=`) pointing to HTTP mirrors — downloads work even with zero BT peers.
 
 ### Red Alert
 
-| Package | HTTP | Magnet |
-| ------- | ---- | ------ |
-| Quick Install (Base + Aftermath + Desert) | [OpenRA mirrors](https://www.openra.net/packages/ra-quickinstall-mirrors.txt) | [magnet link](magnet:?xt=urn:btih:dbba9fd4c649c80f8da8fb974c8164a04a66b6b5&dn=ra-quickinstall.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fra-quickinstall.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fra-quickinstall.zip) |
-| Base Game Files | [OpenRA mirrors](https://www.openra.net/packages/ra-base-mirrors.txt) | [magnet link](magnet:?xt=urn:btih:0fdd7c9c0b245912c308aeee249c19c1fae0387e&dn=ra-base.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fra-base.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fra-base.zip) |
-| Aftermath Expansion | [OpenRA mirrors](https://www.openra.net/packages/ra-aftermath-mirrors.txt) | [magnet link](magnet:?xt=urn:btih:93849a7cb08eb72cd5bc164531e58351750c68e6&dn=ra-aftermath.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fra-aftermath.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fra-aftermath.zip) |
-| C&C Desert Tileset | [OpenRA mirrors](https://www.openra.net/packages/ra-cncdesert-mirrors.txt) | [magnet link](magnet:?xt=urn:btih:9f8f5421c244c8737ed33716d740e35a20fc9be3&dn=ra-cncdesert.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fra-cncdesert.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fra-cncdesert.zip) |
-| Full Discs — Allied + Soviet ISOs | [Archive.org](https://archive.org/details/command-and-conquer-red-alert) | [magnet link](magnet:?xt=urn:btih:6585d7f5b81d2a005c196c47bf5972dff9228840&dn=Red+Alert+Full+Discs&tr=http%3A%2F%2Fbt1.archive.org%3A6969%2Fannounce&tr=http%3A%2F%2Fbt2.archive.org%3A6969%2Fannounce) |
-| 4-CD Set — Base + CS + AM | [Archive.org](https://archive.org/details/red_alert_cd) | [magnet link](magnet:?xt=urn:btih:28b589c17d93b06f173a5be9bb7d94ce423ee5eb&dn=Red+Alert+4-CD+Set&tr=http%3A%2F%2Fbt1.archive.org%3A6969%2Fannounce&tr=http%3A%2F%2Fbt2.archive.org%3A6969%2Fannounce) |
-| Music, Movies, Expansion Music | IC-hosted — not yet seeded | — |
+| Package | Size | HTTP | Magnet |
+| ------- | ---: | ---- | ------ |
+| Quick Install (Base + AM + Desert) | ~18 MB | [OpenRA mirrors][ra-qi-http] | [magnet][ra-qi-magnet] |
+| Base Game Files | ~12 MB | [OpenRA mirrors][ra-base-http] | [magnet][ra-base-magnet] |
+| Aftermath Expansion | ~4 MB | [OpenRA mirrors][ra-am-http] | [magnet][ra-am-magnet] |
+| C&C Desert Tileset | ~1.5 MB | [OpenRA mirrors][ra-desert-http] | [magnet][ra-desert-magnet] |
+| Full Discs — Allied + Soviet ISOs | ~1.3 GB | [Archive.org][ra-full-http] | [magnet][ra-full-magnet] |
+| 4-CD Set — Base + CS + AM | ~1.9 GB | [Archive.org][ra-set-http] | [magnet][ra-set-magnet] |
+| Music (scores.mix) | ~50 MB | [mirror list][ra-music-http] | — |
+| Allied Campaign Movies | ~300 MB | [mirror list][ra-movies-a-http] | — |
+| Soviet Campaign Movies | ~350 MB | [mirror list][ra-movies-s-http] | — |
+| Counterstrike Music | ~30 MB | [mirror list][ra-music-cs-http] | — |
+| Aftermath Music | ~35 MB | [mirror list][ra-music-am-http] | — |
 
 ### Tiberian Dawn
 
-| Package | HTTP | Magnet |
-| ------- | ---- | ------ |
-| Base Game (MIX files) | [OpenRA mirrors](https://www.openra.net/packages/cnc-mirrors.txt), [CDN 1](https://cdn.mailaender.name/openra/cnc-packages.zip), [CDN 2](https://openra.0x47.net/cnc-packages.zip) | [magnet link](magnet:?xt=urn:btih:82f116c7477005303b78d7797d6ff245b15a1505&dn=cnc-packages.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fcnc-packages.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fcnc-packages.zip) |
-| Covert Operations ISO | [CNCNZ](https://files.cncnz.com/cc1_tiberian_dawn/full_game/CovertOps_ISO.zip) | — |
-| GDI + Nod Disc ISOs | [CNCNZ GDI](https://files.cncnz.com/cc1_tiberian_dawn/full_game/GDI95.zip), [CNCNZ Nod](https://files.cncnz.com/cc1_tiberian_dawn/full_game/NOD95.zip), [Archive.org](https://archive.org/details/cnc-dos-eng-v-1.22) | [magnet link](magnet:?xt=urn:btih:8f430be74dee33f9d76f72b50bbf2a537c442794&dn=Tiberian+Dawn+Disc+ISOs&tr=http%3A%2F%2Fbt1.archive.org%3A6969%2Fannounce&tr=http%3A%2F%2Fbt2.archive.org%3A6969%2Fannounce) |
-| Music, Movies | IC-hosted — not yet seeded | — |
+| Package | Size | HTTP | Magnet |
+| ------- | ---: | ---- | ------ |
+| Base Game (MIX files) | ~15 MB | [OpenRA mirrors][td-base-http] · [CDN 1][td-cdn1] · [CDN 2][td-cdn2] | [magnet][td-base-magnet] |
+| GDI + Nod Disc ISOs | ~1.2 GB | [CNCNZ GDI][td-gdi-http] · [CNCNZ Nod][td-nod-http] · [Archive.org][td-disc-archive] | [magnet][td-disc-magnet] |
+| Covert Operations ISO | ~309 MB | [CNCNZ][td-covert-http] | — |
+| Music | ~40 MB | [mirror list][td-music-http] | — |
+| GDI Campaign Movies | ~250 MB | [mirror list][td-movies-gdi-http] | — |
+| Nod Campaign Movies | ~250 MB | [mirror list][td-movies-nod-http] | — |
 
-Magnet links with `&ws=` parameters use the HTTP mirrors as
-[BEP 19 web seeds](https://www.bittorrent.org/beps/bep_0019.html). Any
-BitTorrent client supporting BEP 19 will download directly from the mirrors
-via HTTP Range requests while simultaneously sharing pieces with other peers.
+Magnet URIs with `&ws=` use HTTP mirrors as
+[BEP 19 web seeds](https://www.bittorrent.org/beps/bep_0019.html) — BT
+clients download via HTTP Range requests while sharing pieces with peers.
+Packages showing "—" need `cnc-content torrent-create` run after the content
+ZIP is built. See the [content pipeline](AGENTS.md#p2p-content-pipeline-gap).
 
-> IC-hosted content (music, movies, expansion music) requires the
-> `content-bootstrap` [operations pipeline](AGENTS.md#p2p-content-pipeline-gap)
-> to be completed before magnet links and downloads are available.
->
 > **Dune 2, Dune 2000, Tiberian Sun, Red Alert 2, and Generals** are
 > NOT freeware. This crate supports local source extraction only for those
 > games — users must provide their own legally-obtained copies.
+
+<!-- ── HTTP reference links ─────────────────────────────────────────── -->
+
+[ra-qi-http]: https://www.openra.net/packages/ra-quickinstall-mirrors.txt
+[ra-base-http]: https://www.openra.net/packages/ra-base-mirrors.txt
+[ra-am-http]: https://www.openra.net/packages/ra-aftermath-mirrors.txt
+[ra-desert-http]: https://www.openra.net/packages/ra-cncdesert-mirrors.txt
+[ra-full-http]: https://archive.org/details/command-and-conquer-red-alert
+[ra-set-http]: https://archive.org/details/red_alert_cd
+[ra-music-http]: https://raw.githubusercontent.com/iron-curtain-engine/content-bootstrap/main/mirrors/ra-music.txt
+[ra-movies-a-http]: https://raw.githubusercontent.com/iron-curtain-engine/content-bootstrap/main/mirrors/ra-movies-allied.txt
+[ra-movies-s-http]: https://raw.githubusercontent.com/iron-curtain-engine/content-bootstrap/main/mirrors/ra-movies-soviet.txt
+[ra-music-cs-http]: https://raw.githubusercontent.com/iron-curtain-engine/content-bootstrap/main/mirrors/ra-music-counterstrike.txt
+[ra-music-am-http]: https://raw.githubusercontent.com/iron-curtain-engine/content-bootstrap/main/mirrors/ra-music-aftermath.txt
+
+[td-base-http]: https://www.openra.net/packages/cnc-mirrors.txt
+[td-cdn1]: https://cdn.mailaender.name/openra/cnc-packages.zip
+[td-cdn2]: https://openra.0x47.net/cnc-packages.zip
+[td-gdi-http]: https://files.cncnz.com/cc1_tiberian_dawn/full_game/GDI95.zip
+[td-nod-http]: https://files.cncnz.com/cc1_tiberian_dawn/full_game/NOD95.zip
+[td-disc-archive]: https://archive.org/details/cnc-dos-eng-v-1.22
+[td-covert-http]: https://files.cncnz.com/cc1_tiberian_dawn/full_game/CovertOps_ISO.zip
+[td-music-http]: https://raw.githubusercontent.com/iron-curtain-engine/content-bootstrap/main/mirrors/td-music.txt
+[td-movies-gdi-http]: https://raw.githubusercontent.com/iron-curtain-engine/content-bootstrap/main/mirrors/td-movies-gdi.txt
+[td-movies-nod-http]: https://raw.githubusercontent.com/iron-curtain-engine/content-bootstrap/main/mirrors/td-movies-nod.txt
+
+<!-- ── Magnet reference links (BEP 19 web-seeded) ──────────────────── -->
+
+[ra-qi-magnet]: magnet:?xt=urn:btih:dbba9fd4c649c80f8da8fb974c8164a04a66b6b5&dn=ra-quickinstall.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=udp%3A%2F%2Fexplodie.org%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.tiny-vps.com%3A6969%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fra-quickinstall.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fra-quickinstall.zip
+[ra-base-magnet]: magnet:?xt=urn:btih:0fdd7c9c0b245912c308aeee249c19c1fae0387e&dn=ra-base.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=udp%3A%2F%2Fexplodie.org%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.tiny-vps.com%3A6969%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fra-base.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fra-base.zip
+[ra-am-magnet]: magnet:?xt=urn:btih:93849a7cb08eb72cd5bc164531e58351750c68e6&dn=ra-aftermath.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=udp%3A%2F%2Fexplodie.org%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.tiny-vps.com%3A6969%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fra-aftermath.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fra-aftermath.zip
+[ra-desert-magnet]: magnet:?xt=urn:btih:9f8f5421c244c8737ed33716d740e35a20fc9be3&dn=ra-cncdesert.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=udp%3A%2F%2Fexplodie.org%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.tiny-vps.com%3A6969%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fra-cncdesert.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fra-cncdesert.zip
+[ra-full-magnet]: magnet:?xt=urn:btih:6585d7f5b81d2a005c196c47bf5972dff9228840&dn=Red+Alert+Full+Discs&tr=http%3A%2F%2Fbt1.archive.org%3A6969%2Fannounce&tr=http%3A%2F%2Fbt2.archive.org%3A6969%2Fannounce&ws=https%3A%2F%2Farchive.org%2Fdownload%2Fcommand-and-conquer-red-alert%2FCD1_ALLIED_DISC.ISO&ws=https%3A%2F%2Farchive.org%2Fdownload%2Fcommand-and-conquer-red-alert%2FCD2_SOVIET_DISC.ISO
+[ra-set-magnet]: magnet:?xt=urn:btih:28b589c17d93b06f173a5be9bb7d94ce423ee5eb&dn=Red+Alert+4-CD+Set&tr=http%3A%2F%2Fbt1.archive.org%3A6969%2Fannounce&tr=http%3A%2F%2Fbt2.archive.org%3A6969%2Fannounce&ws=https%3A%2F%2Farchive.org%2Fdownload%2Fred_alert_cd%2FCD1_Allies.iso&ws=https%3A%2F%2Farchive.org%2Fdownload%2Fred_alert_cd%2FCD2_Soviet.iso&ws=https%3A%2F%2Farchive.org%2Fdownload%2Fred_alert_cd%2FCD3_Counterstrike.iso&ws=https%3A%2F%2Farchive.org%2Fdownload%2Fred_alert_cd%2FCD4_Aftermath.iso
+[td-base-magnet]: magnet:?xt=urn:btih:82f116c7477005303b78d7797d6ff245b15a1505&dn=cnc-packages.zip&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=udp%3A%2F%2Fexplodie.org%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.tiny-vps.com%3A6969%2Fannounce&ws=https%3A%2F%2Fcdn.mailaender.name%2Fopenra%2Fcnc-packages.zip&ws=https%3A%2F%2Fopenra.0x47.net%2Fcnc-packages.zip
+[td-disc-magnet]: magnet:?xt=urn:btih:8f430be74dee33f9d76f72b50bbf2a537c442794&dn=Tiberian+Dawn+Disc+ISOs&tr=http%3A%2F%2Fbt1.archive.org%3A6969%2Fannounce&tr=http%3A%2F%2Fbt2.archive.org%3A6969%2Fannounce&ws=https%3A%2F%2Ffiles.cncnz.com%2Fcc1_tiberian_dawn%2Ffull_game%2FGDI95.zip&ws=https%3A%2F%2Ffiles.cncnz.com%2Fcc1_tiberian_dawn%2Ffull_game%2FNOD95.zip
 
 ## Installation
 

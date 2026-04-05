@@ -2556,9 +2556,9 @@ dependencies = [
 
 [[package]]
 name = "soft-canonicalize"
-version = "0.5.4"
+version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "486e7a0425c05839bcaf98e562d676ea0861629f65b96c875f06fcd27f77dbfa"
+checksum = "eaf99d1bbb279dfc59a8642f42fa4b6137935e506c97d1e2e57d282f417f163d"
 dependencies = [
  "proc-canonicalize",
 ]
@@ -2580,9 +2580,9 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "strict-path"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92a651924af6006042a771163fdbfbeea758b47631fe8019ab7a2b93f26cc435"
+checksum = "06bfe1bd0db133da9347ceb34eb8313b9e1c546089a4e830238f878c457a2dfc"
 dependencies = [
  "soft-canonicalize",
 ]
@@ -3659,9 +3659,9 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "8.4.0"
+version = "8.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7756d0206d058333667493c4014f545f4b9603c4330ccd6d9b3f86dcab59f7d9"
+checksum = "2726508a48f38dceb22b35ecbbd2430efe34ff05c62bd3285f965d7911b33464"
 dependencies = [
  "crc32fast",
  "flate2",
