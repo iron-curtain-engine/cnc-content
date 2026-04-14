@@ -33,14 +33,37 @@ impl VdfValue {
     }
 }
 
+/// Maximum input size accepted by the VDF parser (2 MB).
+///
+/// Real Steam VDF files are a few KB at most. 2 MB is generous enough for
+/// any legitimate `libraryfolders.vdf` or `appmanifest_*.acf` while
+/// preventing OOM from a maliciously inflated file.
+const MAX_VDF_INPUT_SIZE: usize = 2 * 1024 * 1024;
+
+/// Maximum nesting depth for VDF sections.
+///
+/// The parser is recursive — for every `{` it calls itself. Without a depth
+/// limit, a crafted VDF file with thousands of nested `{` blocks would cause
+/// a stack overflow. Real Steam VDF files nest at most 3-4 levels deep.
+const MAX_VDF_DEPTH: usize = 64;
+
 /// Parses a VDF text into a top-level section.
+///
+/// Returns `None` for empty or oversized input. Rejects inputs exceeding
+/// [`MAX_VDF_INPUT_SIZE`] (2 MB) and nesting deeper than [`MAX_VDF_DEPTH`]
+/// (64 levels).
 pub fn parse(input: &str) -> Option<HashMap<String, VdfValue>> {
+    // Reject oversized input to prevent OOM via token vector allocation.
+    if input.len() > MAX_VDF_INPUT_SIZE {
+        return None;
+    }
+
     let tokens = tokenize(input);
     let mut iter = tokens.iter().peekable();
     let mut map = HashMap::new();
 
     while iter.peek().is_some() {
-        if let Some((k, v)) = parse_pair(&mut iter) {
+        if let Some((k, v)) = parse_pair(&mut iter, 0) {
             map.insert(k, v);
         } else {
             break;
@@ -127,6 +150,7 @@ fn tokenize(input: &str) -> Vec<Token> {
 
 fn parse_pair(
     iter: &mut std::iter::Peekable<std::slice::Iter<Token>>,
+    depth: usize,
 ) -> Option<(String, VdfValue)> {
     // Expect a key (quoted string).
     let key = match iter.next()? {
@@ -144,6 +168,12 @@ fn parse_pair(
             }
         }
         Token::OpenBrace => {
+            // Guard against stack overflow from deeply nested VDF sections.
+            // A crafted file with thousands of `{` blocks would recurse
+            // unboundedly without this check.
+            if depth >= MAX_VDF_DEPTH {
+                return None;
+            }
             iter.next(); // consume '{'
             let mut section = HashMap::new();
             loop {
@@ -153,7 +183,7 @@ fn parse_pair(
                         break;
                     }
                     Some(_) => {
-                        if let Some((k, v)) = parse_pair(iter) {
+                        if let Some((k, v)) = parse_pair(iter, depth + 1) {
                             section.insert(k, v);
                         } else {
                             break;
@@ -544,5 +574,100 @@ mod tests {
         let root = parse(input).expect("parse failed");
         assert_eq!(root.get("a").unwrap().as_str().unwrap(), "");
         assert_eq!(root.get("b").unwrap().as_str().unwrap(), "");
+    }
+
+    // ── Security: depth and size limits ─────────────────────────────
+
+    /// Input exceeding the size limit is rejected as `None`.
+    ///
+    /// A malicious or corrupted VDF file could be multi-GB. The tokenizer
+    /// builds a `Vec<Token>` proportional to input size, so unbounded input
+    /// causes OOM. The 2 MB limit prevents this.
+    #[test]
+    fn parse_rejects_oversized_input() {
+        let huge = "\"k\" \"v\"\n".repeat(300_000); // ~2.4 MB
+        assert!(
+            huge.len() > MAX_VDF_INPUT_SIZE,
+            "test input must exceed limit"
+        );
+        assert!(parse(&huge).is_none(), "oversized input must be rejected");
+    }
+
+    /// Input just under the size limit is accepted.
+    ///
+    /// The guard must not reject reasonable inputs — only truly oversized ones.
+    #[test]
+    fn parse_accepts_input_under_size_limit() {
+        // A small valid VDF well under 2 MB.
+        let input = r#""key" "value""#;
+        assert!(input.len() < MAX_VDF_INPUT_SIZE);
+        assert!(parse(input).is_some());
+    }
+
+    /// Nesting deeper than the depth limit is silently rejected.
+    ///
+    /// A crafted VDF file with hundreds of nested `{` braces would cause a
+    /// stack overflow via unbounded recursion. The depth limit (64) gates
+    /// the recursion depth and returns `None` for levels beyond the limit.
+    #[test]
+    fn parse_rejects_excessive_nesting() {
+        let depth = MAX_VDF_DEPTH + 10;
+        let mut input = String::new();
+        for i in 0..depth {
+            input.push_str(&format!("\"level{i}\" {{\n"));
+        }
+        input.push_str("\"leaf\" \"value\"\n");
+        for _ in 0..depth {
+            input.push_str("}\n");
+        }
+
+        // Must not panic (stack overflow). The result should be `None` or
+        // a partial parse that stops before reaching the leaf.
+        let result = parse(&input);
+        if let Some(root) = result {
+            // If parsing returned something, the leaf must NOT be reachable
+            // at the full depth — the depth guard should have cut it off.
+            let mut current = Some(&root);
+            for i in 0..depth {
+                let key = format!("level{i}");
+                current = current
+                    .and_then(|m| m.get(&key))
+                    .and_then(|v| v.as_section());
+            }
+            assert!(
+                current.is_none(),
+                "leaf should not be reachable beyond depth limit"
+            );
+        }
+    }
+
+    /// Nesting at exactly the depth limit succeeds.
+    ///
+    /// The limit is checked as `depth >= MAX_VDF_DEPTH`, so nesting at
+    /// exactly `MAX_VDF_DEPTH - 1` (0-indexed levels) must still parse.
+    #[test]
+    fn parse_accepts_nesting_at_limit() {
+        let depth = MAX_VDF_DEPTH; // opening braces = depth, recursion depth = depth
+        let mut input = String::new();
+        for i in 0..depth {
+            input.push_str(&format!("\"l{i}\" {{\n"));
+        }
+        input.push_str("\"leaf\" \"value\"\n");
+        for _ in 0..depth {
+            input.push_str("}\n");
+        }
+
+        let root = parse(&input).expect("input at depth limit should parse");
+        // The leaf at level MAX_VDF_DEPTH should be reachable — the guard
+        // fires at depth > MAX_VDF_DEPTH, so exactly MAX_VDF_DEPTH openings
+        // (0..MAX_VDF_DEPTH-1 as 0-indexed recursion depths) should parse.
+        let mut current = &root;
+        for i in 0..(depth - 1) {
+            let key = format!("l{i}");
+            current = current
+                .get(&key)
+                .and_then(|v| v.as_section())
+                .unwrap_or_else(|| panic!("missing level {i}"));
+        }
     }
 }

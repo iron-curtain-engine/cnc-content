@@ -25,9 +25,18 @@ pub(super) fn extract_torrent_output(
     archive_dir: &Path,
     content_root: &Path,
     package: &DownloadPackage,
-    on_progress: &mut dyn FnMut(DownloadProgress),
+    on_progress: &mut (dyn FnMut(DownloadProgress) + Send),
 ) -> Result<usize, DownloadError> {
     let mut total_files = 0;
+
+    // PathBoundary ensures raw file copies cannot escape content_root.
+    // ZIP and ISO paths are validated by their own extraction code;
+    // this boundary covers loose files (raw .mix, .aud, etc.).
+    let boundary = strict_path::PathBoundary::<()>::try_new_create(content_root).map_err(|e| {
+        DownloadError::Zip {
+            detail: format!("failed to create content boundary: {e}"),
+        }
+    })?;
 
     // Collect downloadable files from the archive directory.
     let entries: Vec<_> = fs::read_dir(archive_dir)?
@@ -54,9 +63,20 @@ pub(super) fn extract_torrent_output(
             }
             _ => {
                 // Raw files (e.g. loose .mix, .aud): copy into content_root.
-                let name = path.file_name().unwrap_or_default();
-                let dest = content_root.join(name);
-                fs::copy(&path, &dest)?;
+                // Path::file_name() strips directory components; strict-path
+                // additionally guards against ADS, 8.3 names, and other
+                // platform-specific edge cases (defense-in-depth).
+                let name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
+                    DownloadError::Zip {
+                        detail: format!("non-UTF-8 filename in torrent output: {}", path.display()),
+                    }
+                })?;
+                let dest = boundary.strict_join(name).map_err(|e| DownloadError::Zip {
+                    detail: format!("blocked path in torrent output \"{name}\": {e}"),
+                })?;
+                let mut src_file = fs::File::open(&path)?;
+                let mut dst_file = dest.create_file()?;
+                io::copy(&mut src_file, &mut dst_file)?;
                 total_files += 1;
             }
         }
@@ -85,7 +105,7 @@ fn extract_iso_via_recipes(
     iso_path: &Path,
     content_root: &Path,
     package: &DownloadPackage,
-    on_progress: &mut dyn FnMut(DownloadProgress),
+    on_progress: &mut (dyn FnMut(DownloadProgress) + Send),
 ) -> Result<usize, DownloadError> {
     // Try to identify this ISO as a known source.
     let source_id = crate::verify::identify_source(iso_path);
@@ -185,7 +205,7 @@ pub(super) const MAX_ZIP_ENTRIES: usize = 100_000;
 pub fn extract_zip(
     zip_path: &Path,
     content_root: &Path,
-    on_progress: &mut dyn FnMut(DownloadProgress),
+    on_progress: &mut (dyn FnMut(DownloadProgress) + Send),
 ) -> Result<usize, DownloadError> {
     let file = fs::File::open(zip_path)?;
     let mut archive =

@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! BitTorrent `.torrent` file creation — generates torrent metadata from local
-//! files so that content can be distributed via P2P.
+//! files or streaming byte sources so that content can be distributed via P2P.
 //!
-//! This module produces:
+//! This module provides two APIs:
 //!
-//! - A `.torrent` file (bencoded metadata with piece hashes)
-//! - The `info_hash` (SHA-1 of the bencoded info dictionary)
+//! - **[`create_torrent`]** — single-shot: reads a file from disk, hashes all
+//!   pieces, and returns the `.torrent` metadata. Simple but requires the file
+//!   to exist on disk first.
+//! - **[`TorrentBuilder`]** — streaming/incremental: feed bytes as they arrive
+//!   (e.g. from an HTTP response body) and finalize into `.torrent` metadata
+//!   when done. Zero disk I/O for the file content — pieces are hashed on the
+//!   fly as bytes stream through. This is the preferred API for the maintainer
+//!   `torrent-create` command.
 //!
 //! ## Piece hashing
 //!
@@ -145,6 +151,159 @@ pub fn create_torrent(
         piece_count,
         file_size,
     })
+}
+
+// ── Streaming torrent builder ───────────────────────────────────────────
+//
+// Hashes pieces incrementally as bytes stream in. No disk I/O for the
+// file content — the caller (e.g. HTTP download) feeds raw bytes and
+// the builder accumulates SHA-1 piece hashes on the fly. When all bytes
+// have been fed, `finalize()` produces the same `TorrentMetadata` that
+// `create_torrent()` would, but without ever needing the file on disk.
+
+/// Incremental torrent metadata builder — hash pieces as bytes stream in.
+///
+/// # Example
+///
+/// ```
+/// use p2p_distribute::torrent_create::TorrentBuilder;
+///
+/// let mut builder = TorrentBuilder::new("content.zip", 256 * 1024);
+/// builder.write(b"first chunk of data");
+/// builder.write(b"second chunk of data");
+/// let metadata = builder.finalize(&[], &[]).unwrap();
+/// assert!(!metadata.info_hash.is_empty());
+/// ```
+pub struct TorrentBuilder {
+    /// File name for the torrent info dictionary `name` field.
+    file_name: String,
+    /// Piece length in bytes — must match what all clients use for this
+    /// file size so that everyone computes the same `info_hash`.
+    piece_length: u64,
+    /// Accumulated SHA-1 piece hashes (20 bytes each).
+    pieces: Vec<u8>,
+    /// SHA-1 hasher for the current (in-progress) piece.
+    current_hasher: sha1::Sha1,
+    /// Bytes fed into the current piece so far (0..piece_length).
+    current_piece_bytes: u64,
+    /// Total bytes fed across all pieces.
+    total_bytes: u64,
+    /// Number of completed pieces.
+    piece_count: u64,
+}
+
+impl TorrentBuilder {
+    /// Creates a new builder for the given file name and piece length.
+    ///
+    /// The `file_name` becomes the `name` field inside the info dictionary.
+    /// It must be identical across all clients for the same content so that
+    /// everyone computes the same `info_hash`.
+    ///
+    /// Use [`recommended_piece_length`] with the expected file size to select
+    /// the correct piece length.
+    pub fn new(file_name: &str, piece_length: u64) -> Self {
+        use sha1::Digest;
+        Self {
+            file_name: file_name.to_string(),
+            piece_length,
+            pieces: Vec::new(),
+            current_hasher: sha1::Sha1::new(),
+            current_piece_bytes: 0,
+            total_bytes: 0,
+            piece_count: 0,
+        }
+    }
+
+    /// Feeds a chunk of bytes into the builder.
+    ///
+    /// Bytes are accumulated into the current piece. When a piece boundary
+    /// is reached (every `piece_length` bytes), the piece is finalized and
+    /// its SHA-1 hash is appended to the pieces list. Chunks may span
+    /// multiple piece boundaries.
+    ///
+    /// Call this repeatedly as data arrives from the network. Order matters
+    /// — bytes must be fed in file order.
+    pub fn write(&mut self, data: &[u8]) {
+        use sha1::Digest;
+
+        let mut offset = 0;
+        while offset < data.len() {
+            // How many bytes remain until the current piece is full.
+            let piece_remaining = self.piece_length.saturating_sub(self.current_piece_bytes);
+            let chunk_remaining = data.len().saturating_sub(offset);
+            let take = std::cmp::min(piece_remaining as usize, chunk_remaining);
+
+            if let Some(slice) = data.get(offset..offset.saturating_add(take)) {
+                self.current_hasher.update(slice);
+                self.current_piece_bytes = self.current_piece_bytes.saturating_add(take as u64);
+                self.total_bytes = self.total_bytes.saturating_add(take as u64);
+                offset = offset.saturating_add(take);
+            }
+
+            // If we've filled a complete piece, finalize it.
+            if self.current_piece_bytes >= self.piece_length {
+                let hasher = std::mem::replace(&mut self.current_hasher, sha1::Sha1::new());
+                self.pieces.extend_from_slice(hasher.finalize().as_slice());
+                self.current_piece_bytes = 0;
+                self.piece_count += 1;
+            }
+        }
+    }
+
+    /// Returns the total number of bytes fed so far.
+    pub fn bytes_written(&self) -> u64 {
+        self.total_bytes
+    }
+
+    /// Finalizes the builder and produces torrent metadata.
+    ///
+    /// If there are leftover bytes in the final partial piece, they are
+    /// hashed and appended. Returns the same `TorrentMetadata` that
+    /// [`create_torrent`] would produce for a file with identical content.
+    ///
+    /// Returns an error if zero bytes were written (empty content).
+    pub fn finalize(
+        mut self,
+        trackers: &[&str],
+        web_seeds: &[&str],
+    ) -> Result<TorrentMetadata, TorrentCreateError> {
+        use sha1::Digest;
+
+        if self.total_bytes == 0 {
+            return Err(TorrentCreateError::EmptyFile {
+                path: self.file_name.clone(),
+            });
+        }
+
+        // Finalize the last partial piece (if any bytes remain).
+        if self.current_piece_bytes > 0 {
+            let hasher = std::mem::replace(&mut self.current_hasher, sha1::Sha1::new());
+            self.pieces.extend_from_slice(hasher.finalize().as_slice());
+            self.piece_count += 1;
+        }
+
+        // Build the info dictionary and compute info_hash — identical to
+        // the create_torrent() code path.
+        let info_dict = bencode_info_dict(
+            &self.file_name,
+            self.total_bytes,
+            self.piece_length,
+            &self.pieces,
+        );
+
+        let mut info_hasher = sha1::Sha1::new();
+        info_hasher.update(&info_dict);
+        let info_hash = crate::hex_encode(info_hasher.finalize().as_slice());
+
+        let torrent_data = bencode_torrent(&info_dict, trackers, web_seeds);
+
+        Ok(TorrentMetadata {
+            torrent_data,
+            info_hash,
+            piece_count: self.piece_count,
+            file_size: self.total_bytes,
+        })
+    }
 }
 
 // ── Bencode helpers ─────────────────────────────────────────────────────
@@ -443,6 +602,137 @@ mod tests {
         let result = create_torrent(&file_path, DEFAULT_PIECE_LENGTH, &[], &[]).unwrap();
         let torrent_str = String::from_utf8_lossy(&result.torrent_data);
         assert!(!torrent_str.contains("url-list"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // ── TorrentBuilder (streaming) ──────────────────────────────────
+
+    /// TorrentBuilder produces the same info_hash as create_torrent for
+    /// identical content — this is the core correctness invariant.
+    ///
+    /// Both APIs must produce bitwise-identical torrent metadata so that
+    /// streaming and file-based creation are interchangeable.
+    #[test]
+    fn builder_matches_create_torrent() {
+        let tmp = std::env::temp_dir().join("p2p-builder-match");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let data = vec![0xCDu8; 512 * 1024]; // 512 KiB
+        let file_path = tmp.join("content.zip");
+        std::fs::write(&file_path, &data).unwrap();
+
+        let piece_length = DEFAULT_PIECE_LENGTH;
+        let trackers = &["udp://tracker.opentrackr.org:1337/announce"];
+        let web_seeds = &["https://mirror.example.com/content.zip"];
+
+        // File-based
+        let file_result = create_torrent(&file_path, piece_length, trackers, web_seeds).unwrap();
+
+        // Streaming
+        let mut builder = TorrentBuilder::new("content.zip", piece_length);
+        builder.write(&data);
+        let stream_result = builder.finalize(trackers, web_seeds).unwrap();
+
+        assert_eq!(file_result.info_hash, stream_result.info_hash);
+        assert_eq!(file_result.torrent_data, stream_result.torrent_data);
+        assert_eq!(file_result.piece_count, stream_result.piece_count);
+        assert_eq!(file_result.file_size, stream_result.file_size);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// TorrentBuilder handles small chunks that span piece boundaries.
+    ///
+    /// Real HTTP responses arrive in arbitrary-sized chunks (often 8 KiB
+    /// or 16 KiB). The builder must correctly split chunks across piece
+    /// boundaries and produce the same result regardless of chunk sizes.
+    #[test]
+    fn builder_small_chunks_match() {
+        let tmp = std::env::temp_dir().join("p2p-builder-chunks");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let data = vec![0xABu8; 300_000]; // ~293 KiB, spans 2 pieces at 256 KiB
+        let file_path = tmp.join("chunked.zip");
+        std::fs::write(&file_path, &data).unwrap();
+
+        let piece_length = DEFAULT_PIECE_LENGTH;
+        let file_result = create_torrent(&file_path, piece_length, &[], &[]).unwrap();
+
+        // Feed in 1 KiB chunks — simulates small HTTP read buffers.
+        let mut builder = TorrentBuilder::new("chunked.zip", piece_length);
+        for chunk in data.chunks(1024) {
+            builder.write(chunk);
+        }
+        let stream_result = builder.finalize(&[], &[]).unwrap();
+
+        assert_eq!(file_result.info_hash, stream_result.info_hash);
+        assert_eq!(file_result.piece_count, stream_result.piece_count);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// TorrentBuilder rejects zero bytes (same as create_torrent rejects
+    /// empty files).
+    #[test]
+    fn builder_rejects_empty() {
+        let builder = TorrentBuilder::new("empty.zip", DEFAULT_PIECE_LENGTH);
+        let result = builder.finalize(&[], &[]);
+        assert!(matches!(result, Err(TorrentCreateError::EmptyFile { .. })));
+    }
+
+    /// TorrentBuilder tracks bytes_written correctly.
+    #[test]
+    fn builder_bytes_written() {
+        let mut builder = TorrentBuilder::new("test.zip", DEFAULT_PIECE_LENGTH);
+        assert_eq!(builder.bytes_written(), 0);
+
+        builder.write(&[0u8; 1000]);
+        assert_eq!(builder.bytes_written(), 1000);
+
+        builder.write(&[0u8; 500]);
+        assert_eq!(builder.bytes_written(), 1500);
+    }
+
+    /// TorrentBuilder is deterministic — same bytes produce same info_hash.
+    #[test]
+    fn builder_deterministic() {
+        let data = b"deterministic builder test content bytes";
+
+        let mut b1 = TorrentBuilder::new("det.zip", DEFAULT_PIECE_LENGTH);
+        b1.write(data);
+        let r1 = b1.finalize(&[], &[]).unwrap();
+
+        let mut b2 = TorrentBuilder::new("det.zip", DEFAULT_PIECE_LENGTH);
+        b2.write(data);
+        let r2 = b2.finalize(&[], &[]).unwrap();
+
+        assert_eq!(r1.info_hash, r2.info_hash);
+        assert_eq!(r1.torrent_data, r2.torrent_data);
+    }
+
+    /// TorrentBuilder handles data that is exactly one piece long.
+    #[test]
+    fn builder_exact_piece_boundary() {
+        let tmp = std::env::temp_dir().join("p2p-builder-exact");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let piece_length = 64 * 1024;
+        let data = vec![0xFFu8; piece_length as usize]; // exactly 1 piece
+        let file_path = tmp.join("exact.zip");
+        std::fs::write(&file_path, &data).unwrap();
+
+        let file_result = create_torrent(&file_path, piece_length, &[], &[]).unwrap();
+
+        let mut builder = TorrentBuilder::new("exact.zip", piece_length);
+        builder.write(&data);
+        let stream_result = builder.finalize(&[], &[]).unwrap();
+
+        assert_eq!(file_result.info_hash, stream_result.info_hash);
+        assert_eq!(stream_result.piece_count, 1);
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

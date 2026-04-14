@@ -1,20 +1,54 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025–present Iron Curtain contributors
 
-//! Content downloader — fetches game content via HTTP mirrors, direct URLs, or
-//! BitTorrent P2P.
+//! Content downloader — fetches game content via P2P-first transport with
+//! HTTP mirrors as BEP 19 web seeds.
 //!
-//! ## Download strategies (in priority order)
+//! ## Architecture: generic transport + game-specific orchestration
 //!
-//! 1. **BitTorrent** (requires `torrent` feature): packages with a non-empty
-//!    `info_hash` are downloaded via P2P using librqbit. Trackers from the
-//!    package definition and the embedded `data/trackers.txt` are combined.
-//!    After the `p2p-distribute` crate ships, HTTP mirrors will also act as
-//!    BEP 19 webseeds within the torrent swarm.
+//! The download infrastructure is layered for reusability:
 //!
-//! 2. **Mirror list**: fetch a URL that returns mirror URLs, try each in order.
+//! ### Generic transport layer (game-agnostic)
 //!
-//! 3. **Direct URLs**: try each URL in order (for CNCNZ, Archive.org, etc.).
+//! These functions know nothing about C&C, Red Alert, or any specific game.
+//! They operate on URLs, paths, sizes, and hashes. Any project can reuse
+//! this layer for downloading files from HTTP mirrors:
+//!
+//! - [`resolve_mirrors`] — merges compiled + runtime + direct mirror URLs
+//! - [`download_to_file`] — FlashGet-style segmented parallel HTTP download
+//!   with SHA-1 verification. Accepts URLs, output path, size hint, hash.
+//! - `mirror::segmented_download` / `parallel_download` / `try_download` —
+//!   low-level HTTP transport primitives
+//! - `extract::extract_zip` — Zip Slip-safe archive extraction
+//!
+//! ### Game-specific orchestration layer
+//!
+//! These functions compose the generic transport with C&C-specific
+//! post-processing (package definitions, recipe extraction, manifest
+//! generation):
+//!
+//! - [`download_package`] — HTTP download + C&C extraction + manifest
+//! - [`download_and_install`] — P2P-first strategy with HTTP fallback +
+//!   C&C extraction + manifest
+//! - [`download_missing`] — game-aware routing (which packages to download
+//!   for a given game)
+//!
+//! ## Transport priority
+//!
+//! **P2P is the default transport.** Every package with a non-empty
+//! `info_hash` downloads via BitTorrent where HTTP mirrors participate as
+//! BEP 19 web seeds — the coordinator treats BT swarm peers and HTTP
+//! mirrors as equal piece sources, picking whichever is fastest for each
+//! piece. This means downloads work with zero BT peers (mirrors serve
+//! all pieces via Range requests) and improve as the swarm grows.
+//!
+//! **HTTP-only is the degraded fallback**, used only when P2P is
+//! unavailable: no `info_hash`, `torrent` feature not compiled,
+//! or `CNC_NO_P2P=1`. Even in this fallback, downloads use FlashGet-
+//! style segmented parallel fetching — the file is split into segments
+//! and each segment is assigned to a different mirror via HTTP Range
+//! requests, aggregating bandwidth from all available mirrors
+//! simultaneously.
 //!
 //! ## Post-download pipeline
 //!
@@ -31,6 +65,8 @@ use std::path::Path;
 use thiserror::Error;
 
 use crate::{DownloadId, DownloadPackage, GameId, SeedingPolicy};
+
+pub mod mirror_health;
 
 /// Errors from download operations.
 #[derive(Debug, Error)]
@@ -88,23 +124,31 @@ pub enum DownloadProgress {
 /// Download strategy selected for a package based on available sources.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DownloadStrategy {
-    /// BitTorrent P2P download (package has info_hash and torrent feature is enabled).
+    /// BitTorrent P2P download with HTTP mirrors as BEP 19 web seeds.
+    /// This is the **default** — mirrors and swarm peers are equal piece
+    /// sources in a unified coordinator.
     Torrent,
-    /// HTTP download from mirror list and/or direct URLs.
+    /// HTTP-only fallback — FlashGet-style segmented parallel download
+    /// from multiple mirrors. Used only when P2P is unavailable.
     Http,
 }
 
-/// Determines the best download strategy for a package.
+/// Determines the download strategy for a package.
+///
+/// **P2P is the default.** Falls back to HTTP only when:
+/// - Package has no `info_hash` (no torrent metadata available)
+/// - `torrent` feature is not compiled in
+/// - `CNC_NO_P2P=1` environment variable is set
 pub fn select_strategy(package: &DownloadPackage) -> DownloadStrategy {
-    // CNC_NO_P2P=1 disables P2P transport entirely, forcing HTTP.
+    // CNC_NO_P2P=1 disables P2P transport entirely, forcing HTTP fallback.
     // Useful for CI, restricted networks, or debugging mirror issues.
     if std::env::var("CNC_NO_P2P").as_deref() == Ok("1") {
         return DownloadStrategy::Http;
     }
 
-    // Use torrent when available: non-empty info_hash and torrent feature compiled in.
+    // P2P is the default whenever torrent metadata exists.
     #[cfg(feature = "torrent")]
-    if crate::torrent::should_use_p2p(package) {
+    if package.info_hash.is_some() {
         return DownloadStrategy::Torrent;
     }
 
@@ -112,49 +156,91 @@ pub fn select_strategy(package: &DownloadPackage) -> DownloadStrategy {
     DownloadStrategy::Http
 }
 
-/// Downloads and extracts a content package via HTTP mirrors.
+// ── Generic transport layer (game-agnostic) ─────────────────────────
+//
+// These functions know nothing about C&C, packages, or games. They
+// operate on URLs, paths, sizes, and hashes. Any project that needs
+// multi-mirror HTTP downloads can reuse this layer directly.
+
+/// Resolves a deduplicated list of download URLs from multiple sources.
 ///
-/// Resolves download URLs from the mirror list and/or direct URLs, tries each
-/// in order, verifies SHA-1 (if not placeholder), then extracts the ZIP into
-/// `content_root`.
-pub fn download_package(
-    package: &DownloadPackage,
-    content_root: &Path,
-    on_progress: &mut dyn FnMut(DownloadProgress),
+/// Merges mirrors from three tiers (in priority order):
+/// 1. `compiled_mirrors` — baked into the binary at compile time
+/// 2. `runtime_mirrors` — fetched from a mirror list URL at download time
+/// 3. `direct_urls` — static fallback URLs from the package definition
+///
+/// This function is **game-agnostic** — it operates purely on URL strings.
+/// The caller decides where the mirror lists come from.
+pub fn resolve_mirrors(
+    compiled_mirrors: &[String],
+    runtime_mirrors: &[String],
+    direct_urls: &[&str],
+) -> Vec<String> {
+    // Start with compiled mirrors (tamper-proof baseline).
+    let mut urls: Vec<String> = compiled_mirrors.to_vec();
+
+    // Add unique runtime mirrors (discovered since last binary release).
+    for m in runtime_mirrors {
+        if !urls.iter().any(|u| u == m) {
+            urls.push(m.clone());
+        }
+    }
+
+    // Merge with direct URLs via the low-level resolver (adds unique direct
+    // URLs that aren't already in the mirror list).
+    let url_refs: Vec<&str> = urls.iter().map(String::as_str).collect();
+    resolve_download_urls(
+        if url_refs.is_empty() {
+            None
+        } else {
+            Some(&urls)
+        },
+        direct_urls,
+    )
+}
+
+/// Downloads a file from HTTP mirrors to a local path with SHA-1 verification.
+///
+/// This is the **game-agnostic** HTTP download primitive. It knows nothing
+/// about C&C packages, games, or extraction — it just downloads bytes from
+/// mirrors to a file and optionally verifies a SHA-1 hash.
+///
+/// ## Fused download + hash pipeline
+///
+/// SHA-1 is computed inline during the download/assembly — the same bytes
+/// that flow from the network to disk are fed to the hasher in a single
+/// pass. This eliminates a separate sequential re-read of potentially
+/// 500 MB+ files (inspired by BLAKE3's streaming verification model).
+///
+/// ## Transport strategy
+///
+/// - **Single mirror**: direct sequential download (no thread overhead).
+/// - **Multiple mirrors + known size**: FlashGet-style segmented parallel
+///   download — the file is split into segments, each mirror fetches its
+///   byte range via HTTP Range, bandwidth is aggregated.
+/// - **Multiple mirrors + unknown size**: parallel mirror racing — all
+///   mirrors start concurrently, first complete download wins.
+///
+/// ## Parameters
+///
+/// - `urls` — resolved mirror URLs (call [`resolve_mirrors`] first)
+/// - `dest` — output file path (parent directory must exist)
+/// - `size_hint` — expected file size in bytes (0 = unknown; enables
+///   segmented download when > 0 and multiple mirrors available)
+/// - `expected_sha1` — hex-encoded SHA-1 hash to verify after download.
+///   Pass an empty string or all-zero placeholder to skip verification.
+/// - `on_progress` — callback for download progress events
+pub fn download_to_file(
+    urls: &[String],
+    dest: &std::path::Path,
+    size_hint: u64,
+    expected_sha1: Option<&str>,
+    on_progress: &mut (dyn FnMut(DownloadProgress) + Send),
 ) -> Result<(), DownloadError> {
-    fs::create_dir_all(content_root)?;
-    let zip_path = content_root.join(".download.zip.tmp");
-
-    // CNC_MIRROR_LIST_URL overrides the per-package mirror list URL.
-    // Useful for testing against a local or staging mirror list.
-    let mirror_list_url_override = std::env::var("CNC_MIRROR_LIST_URL").ok();
-    let effective_mirror_url =
-        mirror_list_url_override
-            .as_deref()
-            .or(if !package.mirror_list_url.is_empty() {
-                Some(package.mirror_list_url.as_str())
-            } else {
-                None
-            });
-
-    // 1. Resolve URLs: mirror list first, then direct URLs as fallback.
-    let mirror_result = if let Some(url) = effective_mirror_url {
-        on_progress(DownloadProgress::FetchingMirrors {
-            url: url.to_string(),
-        });
-        fetch_mirror_list(url).ok()
-    } else {
-        None
-    };
-
-    let direct_url_strs: Vec<&str> = package.direct_urls.iter().map(String::as_str).collect();
-    let urls = resolve_download_urls(mirror_result.as_deref(), &direct_url_strs);
-
     if urls.is_empty() {
         return Err(DownloadError::NoUrls);
     }
 
-    // 2. Download: race all mirrors in parallel, first success wins.
     let total_urls = urls.len();
     on_progress(DownloadProgress::TryingMirror {
         index: 0,
@@ -162,71 +248,135 @@ pub fn download_package(
         url: if total_urls == 1 {
             urls.first().cloned().unwrap_or_default()
         } else {
-            format!("{total_urls} mirrors in parallel")
+            format!("{total_urls} mirrors — segmented parallel download")
         },
     });
 
-    let download_result = if total_urls == 1 {
+    // All transport paths now return the SHA-1 computed inline during
+    // download/assembly. This eliminates a full re-read verification pass.
+    let download_result: Result<String, String> = if total_urls == 1 {
         // Single URL — no need to spawn threads.
         try_download(
             urls.first().map(|s| s.as_str()).unwrap_or(""),
-            &zip_path,
-            package.size_hint,
+            dest,
+            size_hint,
             &mut |bytes, total| {
                 on_progress(DownloadProgress::Downloading { bytes, total });
             },
         )
-        .map(|_| ())
+        .map(|(_bytes, sha1)| sha1)
         .map_err(|e| e.to_string())
+    } else if size_hint > 0 {
+        // Multiple mirrors + known size: segmented parallel download.
+        // SHA-1 is computed during segment assembly.
+        segmented_download(urls, dest, size_hint, &mut |bytes, total| {
+            on_progress(DownloadProgress::Downloading { bytes, total });
+        })
     } else {
-        parallel_download(&urls, &zip_path, package.size_hint, &mut |bytes, total| {
+        // Multiple mirrors but unknown size: fall back to mirror racing.
+        // Winner thread returns its inline SHA-1.
+        parallel_download(urls, dest, size_hint, &mut |bytes, total| {
             on_progress(DownloadProgress::Downloading { bytes, total });
         })
     };
 
-    if let Err(last_error) = download_result {
-        let _ = fs::remove_file(&zip_path);
-        return Err(DownloadError::AllMirrorsFailed {
-            count: total_urls,
-            last_error,
-        });
-    }
-
-    // 3. Verify SHA-1 (skip for placeholder all-zero hashes).
-    //    Placeholder hashes mean the content source hasn't published a hash
-    //    yet. The user should be warned that integrity is unverified.
-    let is_placeholder = package.sha1.chars().all(|c| c == '0');
-    if is_placeholder {
-        on_progress(DownloadProgress::VerifyingSkipped);
-    } else {
-        on_progress(DownloadProgress::Verifying);
-        let actual_sha1 = crate::verify::sha1_file(&zip_path, None)?;
-        if actual_sha1 != package.sha1 {
-            let _ = fs::remove_file(&zip_path);
-            return Err(DownloadError::Sha1Mismatch {
-                expected: package.sha1.to_string(),
-                actual: actual_sha1,
+    let fused_sha1 = match download_result {
+        Ok(sha1) => sha1,
+        Err(last_error) => {
+            let _ = fs::remove_file(dest);
+            return Err(DownloadError::AllMirrorsFailed {
+                count: total_urls,
+                last_error,
             });
         }
-    }
+    };
 
-    // 4. Extract ZIP.
-    let files = extract_zip(&zip_path, content_root, on_progress)?;
+    // Verify SHA-1 using the hash computed inline during download — no
+    // re-read of the file. Zero additional I/O for verification.
+    check_sha1(&fused_sha1, expected_sha1, dest, on_progress)?;
 
-    // 5. Generate post-extraction manifest for integrity verification.
-    //    This writes content-manifest.toml so future `verify` commands can
-    //    detect tampering or corruption without re-downloading.
-    if let Ok(manifest) =
-        crate::verify::generate_manifest(content_root, package.game.slug(), "v1", &package.provides)
-    {
-        let manifest_path = content_root.join("content-manifest.toml");
-        if let Ok(toml_str) = toml::to_string(&manifest) {
-            let _ = fs::write(&manifest_path, toml_str);
+    Ok(())
+}
+
+/// Checks a pre-computed SHA-1 against the expected value.
+///
+/// Unlike the old `verify_sha1` which re-read the entire file from disk,
+/// this function only compares strings — the hash was already computed
+/// inline during the download loop. On mismatch, deletes the file and
+/// returns [`DownloadError::Sha1Mismatch`]. When no expected hash is
+/// provided (`None`), verification is skipped.
+fn check_sha1(
+    actual: &str,
+    expected: Option<&str>,
+    file: &std::path::Path,
+    on_progress: &mut (dyn FnMut(DownloadProgress) + Send),
+) -> Result<(), DownloadError> {
+    match expected {
+        None => {
+            on_progress(DownloadProgress::VerifyingSkipped);
+        }
+        Some(expected_hash) => {
+            on_progress(DownloadProgress::Verifying);
+            if actual != expected_hash {
+                let _ = fs::remove_file(file);
+                return Err(DownloadError::Sha1Mismatch {
+                    expected: expected_hash.to_string(),
+                    actual: actual.to_string(),
+                });
+            }
         }
     }
+    Ok(())
+}
 
-    // 6. Apply seeding policy: delete archive if ExtractAndDelete.
-    //    Other policies retain the archive for seeding or re-extraction.
+// ── C&C-specific orchestration layer ────────────────────────────────
+//
+// These functions compose the generic transport with C&C-specific
+// package definitions, extraction recipes, and manifest generation.
+// They are intentionally coupled to DownloadPackage / GameId because
+// this crate IS the C&C content manager. The generic layer above is
+// what other projects would reuse.
+
+/// Downloads and extracts a content package via HTTP mirrors (fallback path).
+///
+/// This is the **degraded fallback** used only when P2P is unavailable
+/// (no `info_hash`, `torrent` feature not compiled, or `CNC_NO_P2P=1`).
+/// Delegates to the generic [`download_to_file`] for transport, then
+/// applies C&C-specific extraction and manifest generation.
+///
+/// No seeding occurs on this path — seeding requires the pre-configured
+/// `.torrent` file that the P2P path uses via librqbit. The HTTP fallback
+/// is a degraded mode that sacrifices P2P participation for reliability.
+pub fn download_package(
+    package: &DownloadPackage,
+    content_root: &Path,
+    on_progress: &mut (dyn FnMut(DownloadProgress) + Send),
+) -> Result<(), DownloadError> {
+    fs::create_dir_all(content_root)?;
+    let zip_path = content_root.join(".download.zip.tmp");
+
+    // ── 1. Resolve mirrors (generic) ────────────────────────────────
+    let (compiled, runtime) = resolve_package_mirrors(package, on_progress);
+
+    let direct_url_strs: Vec<&str> = package.direct_urls.iter().map(String::as_str).collect();
+    let urls = resolve_mirrors(&compiled, &runtime, &direct_url_strs);
+
+    // ── 2. Download + verify (generic) ──────────────────────────────
+    download_to_file(
+        &urls,
+        &zip_path,
+        package.size_hint,
+        package.sha1.as_deref(),
+        on_progress,
+    )?;
+
+    // ── 3. Extract ZIP (C&C-specific post-processing) ───────────────
+    let files = extract_zip(&zip_path, content_root, on_progress)?;
+
+    // ── 4. Generate integrity manifest (C&C-specific) ───────────────
+    write_content_manifest(content_root, package);
+
+    // ── 5. Clean up temp archive ────────────────────────────────────
     let _ = fs::remove_file(&zip_path);
 
     on_progress(DownloadProgress::Complete { files });
@@ -238,7 +388,13 @@ pub fn download_package(
 /// Strategy selection:
 /// 1. If the package has an `info_hash` and the `torrent` feature is enabled,
 ///    downloads via BitTorrent P2P (with tracker + DHT peer discovery).
-/// 2. Otherwise, downloads via HTTP mirrors (mirror list + direct URLs).
+///    p2p-distribute provides protocol obfuscation (DPI evasion), random
+///    port selection, and relay circuits to work around P2P blocking.
+/// 2. If P2P fails at runtime (all peers blocked, tracker unreachable,
+///    NAT impenetrable), automatically falls back to HTTP mirrors using
+///    FlashGet-style segmented parallel download.
+/// 3. If no `info_hash` exists or the `torrent` feature is absent,
+///    downloads directly via HTTP mirrors.
 ///
 /// After download: SHA-1 verify → extract → generate integrity manifest →
 /// apply seeding policy.
@@ -249,7 +405,7 @@ pub fn download_and_install(
     package: &DownloadPackage,
     content_root: &Path,
     seeding_policy: SeedingPolicy,
-    on_progress: &mut dyn FnMut(DownloadProgress),
+    on_progress: &mut (dyn FnMut(DownloadProgress) + Send),
 ) -> Result<(), DownloadError> {
     let strategy = select_strategy(package);
     let _ = &seeding_policy; // used conditionally by torrent feature
@@ -258,14 +414,33 @@ pub fn download_and_install(
         DownloadStrategy::Torrent => {
             #[cfg(feature = "torrent")]
             {
-                if package.format == "zip" {
-                    // Single-file ZIP: coordinated download with web seeds +
-                    // BT swarm as equal peers in a unified piece picker.
+                // P2P-first: attempt coordinated download (BT swarm + HTTP
+                // mirrors as BEP 19 web seeds). If P2P fails at runtime
+                // (all peers blocked, tracker unreachable, NAT impenetrable
+                // even after relay/hole-punch attempts), automatically fall
+                // back to HTTP-only FlashGet-style segmented download.
+                //
+                // This mirrors the eMule lesson: obfuscation and relay help
+                // most users, but some networks block ALL non-HTTP traffic.
+                // The fallback ensures content is always reachable.
+                let p2p_result = if package.format == "zip" {
                     download_coordinated(package, content_root, seeding_policy, on_progress)
                 } else {
-                    // Multi-file torrents (ISO disc images): librqbit handles
-                    // natively — it manages multi-file piece mapping internally.
                     download_via_librqbit(package, content_root, seeding_policy, on_progress)
+                };
+
+                match p2p_result {
+                    Ok(()) => Ok(()),
+                    Err(p2p_err) => {
+                        // P2P failed — degrade to HTTP-only.
+                        // Log the P2P failure so the user knows why we fell back.
+                        on_progress(DownloadProgress::TryingMirror {
+                            index: 0,
+                            total: 0,
+                            url: format!("P2P failed ({p2p_err}), falling back to HTTP mirrors"),
+                        });
+                        download_package(package, content_root, on_progress)
+                    }
                 }
             }
 
@@ -292,7 +467,7 @@ fn download_via_librqbit(
     package: &DownloadPackage,
     content_root: &Path,
     seeding_policy: SeedingPolicy,
-    on_progress: &mut dyn FnMut(DownloadProgress),
+    on_progress: &mut (dyn FnMut(DownloadProgress) + Send),
 ) -> Result<(), DownloadError> {
     use crate::torrent::{TorrentConfig, TorrentDownloader, TorrentProgress};
 
@@ -308,7 +483,10 @@ fn download_via_librqbit(
         })?;
 
     on_progress(DownloadProgress::FetchingMirrors {
-        url: format!("magnet:?xt=urn:btih:{}", package.info_hash),
+        url: format!(
+            "magnet:?xt=urn:btih:{}",
+            package.info_hash.as_deref().unwrap_or("")
+        ),
     });
 
     let archive_dir = downloader
@@ -344,15 +522,8 @@ fn download_via_librqbit(
     // Extract downloaded archives into content_root.
     let files = extract_torrent_output(&archive_dir, content_root, package, on_progress)?;
 
-    // Generate post-extraction manifest.
-    if let Ok(manifest) =
-        crate::verify::generate_manifest(content_root, package.game.slug(), "v1", &package.provides)
-    {
-        let manifest_path = content_root.join("content-manifest.toml");
-        if let Ok(toml_str) = toml::to_string(&manifest) {
-            let _ = fs::write(&manifest_path, toml_str);
-        }
-    }
+    // Generate post-extraction manifest (C&C-specific).
+    write_content_manifest(content_root, package);
 
     // Apply seeding policy: delete archives if ExtractAndDelete.
     if !seeding_policy.retains_archives() {
@@ -389,7 +560,7 @@ fn download_coordinated(
     package: &DownloadPackage,
     content_root: &Path,
     seeding_policy: SeedingPolicy,
-    on_progress: &mut dyn FnMut(DownloadProgress),
+    on_progress: &mut (dyn FnMut(DownloadProgress) + Send),
 ) -> Result<(), DownloadError> {
     use std::sync::Arc;
 
@@ -407,7 +578,10 @@ fn download_coordinated(
 
     // ── 1. Resolve magnet URI → torrent metadata + running librqbit session ──
     on_progress(DownloadProgress::FetchingMirrors {
-        url: format!("magnet:?xt=urn:btih:{}", package.info_hash),
+        url: format!(
+            "magnet:?xt=urn:btih:{}",
+            package.info_hash.as_deref().unwrap_or("")
+        ),
     });
 
     let resolved = crate::torrent::resolve_and_start(package, &config).map_err(|e| {
@@ -419,28 +593,12 @@ fn download_coordinated(
 
     // ── 2. Collect web seed URLs from all available sources ──────────
     //
-    // Sources (in priority order):
-    // a. Static web_seeds from the package definition (Archive.org, CDN mirrors)
-    // b. Mirror list URLs resolved at runtime (OpenRA mirrors)
-    // c. Direct URLs from the package definition
-    let mirror_list_url_override = std::env::var("CNC_MIRROR_LIST_URL").ok();
-    let effective_mirror_url =
-        mirror_list_url_override
-            .as_deref()
-            .or(if !package.mirror_list_url.is_empty() {
-                Some(package.mirror_list_url.as_str())
-            } else {
-                None
-            });
-
-    let mirror_urls = if let Some(url) = effective_mirror_url {
-        fetch_mirror_list(url).ok()
-    } else {
-        None
-    };
-
+    // Uses the shared mirror resolver, then merges with static web_seeds.
+    // The generic resolve_mirrors function knows nothing about C&C — the
+    // package-specific mirror lookup is in resolve_package_mirrors.
+    let (compiled, runtime) = resolve_package_mirrors(package, on_progress);
     let direct_url_strs: Vec<&str> = package.direct_urls.iter().map(String::as_str).collect();
-    let resolved_urls = resolve_download_urls(mirror_urls.as_deref(), &direct_url_strs);
+    let resolved_urls = resolve_mirrors(&compiled, &runtime, &direct_url_strs);
 
     // ── 3. Build the coordinator with BT swarm + web seed peers ─────
     let info = resolved.info.clone();
@@ -514,35 +672,22 @@ fn download_coordinated(
     // ── 5. Whole-file SHA-1 verification (defense in depth) ─────────
     //
     // Each piece was already SHA-1 verified by the coordinator. This
-    // whole-file check is a belt-and-suspenders validation that the
-    // assembled file is correct. Skip for placeholder all-zero hashes.
-    let is_placeholder = package.sha1.chars().all(|c| c == '0');
-    if is_placeholder {
-        on_progress(DownloadProgress::VerifyingSkipped);
-    } else {
-        on_progress(DownloadProgress::Verifying);
-        let actual_sha1 = crate::verify::sha1_file(&output_path, None)?;
-        if actual_sha1 != package.sha1 {
-            let _ = fs::remove_file(&output_path);
-            return Err(DownloadError::Sha1Mismatch {
-                expected: package.sha1.to_string(),
-                actual: actual_sha1,
-            });
-        }
-    }
+    // whole-file check is belt-and-suspenders validation — compute the
+    // SHA-1 of the assembled file and compare against the expected hash.
+    let actual_sha1 = crate::verify::sha1_file(&output_path, None)
+        .map_err(|e| DownloadError::Io { source: e })?;
+    check_sha1(
+        &actual_sha1,
+        package.sha1.as_deref(),
+        &output_path,
+        on_progress,
+    )?;
 
     // ── 6. Extract the archive into content_root ────────────────────
     let files = extract_zip(&output_path, content_root, on_progress)?;
 
-    // ── 7. Generate post-extraction manifest ────────────────────────
-    if let Ok(manifest) =
-        crate::verify::generate_manifest(content_root, package.game.slug(), "v1", &package.provides)
-    {
-        let manifest_path = content_root.join("content-manifest.toml");
-        if let Ok(toml_str) = toml::to_string(&manifest) {
-            let _ = fs::write(&manifest_path, toml_str);
-        }
-    }
+    // ── 7. Generate post-extraction manifest (C&C-specific) ─────────
+    write_content_manifest(content_root, package);
 
     // ── 8. Apply seeding policy ─────────────────────────────────────
     let _ = fs::remove_file(&output_path);
@@ -553,13 +698,18 @@ fn download_coordinated(
 
 /// Downloads all required content for a game that is currently missing.
 ///
-/// Only EA-declared freeware games (Red Alert, Tiberian Dawn) support
-/// downloading. Non-freeware games (Dune 2, Dune 2000) require the user
-/// to provide their own local copies.
+/// Routes through [`download_and_install`] which uses P2P by default
+/// (BT swarm + HTTP mirrors as BEP 19 web seeds). Falls back to HTTP
+/// only when P2P is unavailable.
+///
+/// Only EA-declared freeware games (Red Alert, Tiberian Dawn, Tiberian
+/// Sun) support downloading. Non-freeware games (Dune 2, Dune 2000)
+/// require the user to provide their own local copies.
 pub fn download_missing(
     content_root: &Path,
     game: GameId,
-    on_progress: &mut dyn FnMut(DownloadProgress),
+    seeding_policy: SeedingPolicy,
+    on_progress: &mut (dyn FnMut(DownloadProgress) + Send),
 ) -> Result<(), DownloadError> {
     if !game.is_freeware() {
         return Err(DownloadError::NotFreeware {
@@ -578,14 +728,28 @@ pub fn download_missing(
                 crate::download(DownloadId::RaQuickInstall).ok_or_else(|| DownloadError::Io {
                     source: io::Error::other("no download definition for RaQuickInstall"),
                 })?;
-            download_package(pkg, content_root, on_progress)?;
+            download_and_install(pkg, content_root, seeding_policy, on_progress)?;
         }
         GameId::TiberianDawn => {
             let pkg =
                 crate::download(DownloadId::TdBaseFiles).ok_or_else(|| DownloadError::Io {
                     source: io::Error::other("no download definition for TdBaseFiles"),
                 })?;
-            download_package(pkg, content_root, on_progress)?;
+            download_and_install(pkg, content_root, seeding_policy, on_progress)?;
+        }
+        GameId::TiberianSun => {
+            // TS freeware: GDI disc ISO covers base game + music + movies.
+            // Firestorm disc ISO covers the expansion pack.
+            let gdi = crate::download(DownloadId::TsGdiIso).ok_or_else(|| DownloadError::Io {
+                source: io::Error::other("no download definition for TsGdiIso"),
+            })?;
+            download_and_install(gdi, content_root, seeding_policy, on_progress)?;
+
+            let firestorm =
+                crate::download(DownloadId::TsFirestormIso).ok_or_else(|| DownloadError::Io {
+                    source: io::Error::other("no download definition for TsFirestormIso"),
+                })?;
+            download_and_install(firestorm, content_root, seeding_policy, on_progress)?;
         }
         // Non-freeware games blocked above by is_freeware() check.
         _ => unreachable!(),
@@ -593,13 +757,66 @@ pub fn download_missing(
     Ok(())
 }
 
+// ── C&C-specific helpers (shared by download_package, coordinated, librqbit) ──
+
+/// Resolves compiled and runtime mirror lists for a C&C download package.
+///
+/// Extracts mirror URLs from the package's compiled cache and optional
+/// runtime mirror list URL. Returns `(compiled, runtime)` vectors ready
+/// for [`resolve_mirrors`].
+fn resolve_package_mirrors(
+    package: &DownloadPackage,
+    on_progress: &mut (dyn FnMut(DownloadProgress) + Send),
+) -> (Vec<String>, Vec<String>) {
+    // CNC_MIRROR_LIST_URL overrides the per-package mirror list URL.
+    let mirror_list_url_override = std::env::var("CNC_MIRROR_LIST_URL").ok();
+    let effective_mirror_url = mirror_list_url_override
+        .as_deref()
+        .or(package.mirror_list_url.as_deref());
+
+    let compiled = crate::downloads::compiled_mirrors(package.id)
+        .map(|urls| urls.to_vec())
+        .unwrap_or_default();
+
+    let runtime = if let Some(url) = effective_mirror_url {
+        on_progress(DownloadProgress::FetchingMirrors {
+            url: url.to_string(),
+        });
+        fetch_mirror_list(url).ok().unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    (compiled, runtime)
+}
+
+/// Writes a post-extraction content manifest for C&C integrity verification.
+///
+/// Generates `content-manifest.toml` so future `verify` commands can detect
+/// tampering or corruption without re-downloading. Errors are silently
+/// ignored — manifest generation is best-effort.
+fn write_content_manifest(content_root: &Path, package: &DownloadPackage) {
+    if let Ok(manifest) =
+        crate::verify::generate_manifest(content_root, package.game.slug(), "v1", &package.provides)
+    {
+        let manifest_path = content_root.join("content-manifest.toml");
+        if let Ok(toml_str) = toml::to_string(&manifest) {
+            let _ = fs::write(&manifest_path, toml_str);
+        }
+    }
+}
+
 // ── Sub-modules ───────────────────────────────────────────────────────
 
 /// Mirror URL resolution, safety validation, and HTTP download helpers.
 mod mirror;
-use self::mirror::{fetch_mirror_list, parallel_download, resolve_download_urls, try_download};
 #[cfg(test)]
-use self::mirror::{is_safe_mirror_url, parse_mirror_list_response};
+use self::mirror::is_safe_mirror_url;
+#[cfg(test)]
+use self::mirror::parse_mirror_list_response;
+use self::mirror::{
+    fetch_mirror_list, parallel_download, resolve_download_urls, segmented_download, try_download,
+};
 
 /// Post-download extraction — ZIP, torrent archives, ISO disc images.
 mod extract;

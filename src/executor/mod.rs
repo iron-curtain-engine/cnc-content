@@ -68,6 +68,12 @@ pub enum ExecutorError {
     #[error("source file not found: {path}")]
     SourceFileNotFound { path: PathBuf },
 
+    #[error("ISO image not found at source: {path}")]
+    IsoNotFound { path: PathBuf },
+
+    #[error("ISO entry not found: {entry} in {archive}")]
+    IsoEntryNotFound { archive: String, entry: String },
+
     #[error("path traversal blocked: \"{path}\" escapes boundary ({detail})")]
     PathTraversal { path: String, detail: String },
 }
@@ -233,6 +239,35 @@ pub fn execute_recipe(
                 files_written += written;
                 total_bytes += bytes;
             }
+
+            InstallAction::ExtractIso {
+                source_iso,
+                entries,
+            } => {
+                let iso = bounded_path(&source, source_iso)?;
+                let (written, bytes) =
+                    extract_from_iso(&iso, &content, entries, source_iso, &mut on_progress)?;
+                files_written += written;
+                total_bytes += bytes;
+            }
+
+            InstallAction::ExtractMixFromIso {
+                source_iso,
+                iso_mix_path,
+                entries,
+            } => {
+                let iso = bounded_path(&source, source_iso)?;
+                let (written, bytes) = extract_mix_from_iso(
+                    &iso,
+                    &content,
+                    iso_mix_path,
+                    entries,
+                    source_iso,
+                    &mut on_progress,
+                )?;
+                files_written += written;
+                total_bytes += bytes;
+            }
         }
     }
 
@@ -249,7 +284,8 @@ pub fn execute_recipe(
 mod extract;
 use self::extract::{
     bounded_path, describe_action, extract_from_bag_idx, extract_from_big, extract_from_iscab,
-    extract_from_meg, extract_from_mix, extract_from_zip, extract_raw_entry,
+    extract_from_iso, extract_from_meg, extract_from_mix, extract_from_zip, extract_mix_from_iso,
+    extract_raw_entry,
 };
 
 #[cfg(test)]

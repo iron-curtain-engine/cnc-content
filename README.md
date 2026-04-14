@@ -24,16 +24,19 @@ source. Works as a standalone CLI tool or as a library for engine integration.
 
 ## What it does
 
-- **Defines** what each game needs (packages, sources, downloads)
-- **Identifies** content sources on disk (discs, Steam, GOG, Origin installs)
-- **Downloads** freeware content via HTTP mirrors (with SHA-1 verification)
-- **Extracts** content from MIX archives, InstallShield CABs, ZIPs, raw offsets
-- **Verifies** installed content integrity (SHA-256 manifests)
+- **Defines** what each game needs (25 packages, 35 sources, 26 downloads across 7 games)
+- **Identifies** content sources on disk (discs, Steam, GOG, Origin, OpenRA, registry, CNCNet)
+- **Downloads** freeware content via P2P swarm with HTTP web seeds, or multi-mirror HTTP fallback
+- **Extracts** content from MIX, BIG, MEG, BAG/IDX archives, InstallShield CABs, ZIPs, and raw offsets
+- **Verifies** source identity (SHA-1) and installed content integrity (BLAKE3 manifests)
+- **Streams** media content (video, audio) during download via `p2p-distribute`'s streaming reader
+- **Seeds** downloaded content via BitTorrent to reduce mirror load
 
 ## Status
 
-> **Alpha / pre-1.0** — core download, verification, and source detection pipeline
-> is functional. P2P distribution is planned for future phases.
+> **Alpha / pre-1.0** — core download, verification, source detection, and P2P
+> distribution pipeline is functional. The `p2p-distribute` sub-crate provides
+> piece-level coordination, streaming, and swarm management.
 
 ## Supported Games
 
@@ -43,7 +46,7 @@ source. Works as a standalone CLI tool or as a library for engine integration.
 | Command & Conquer: Tiberian Dawn   | `td`       | Freeware (EA, 2007) — downloadable |
 | Dune II: The Building of a Dynasty | `dune2`    | NOT freeware — local source only   |
 | Dune 2000                          | `dune2000` | NOT freeware — local source only   |
-| Command & Conquer: Tiberian Sun    | `ts`       | NOT freeware — local source only   |
+| Command & Conquer: Tiberian Sun    | `ts`       | Freeware (EA, 2010) — downloadable |
 | Command & Conquer: Red Alert 2     | `ra2`      | NOT freeware — local source only   |
 | Command & Conquer: Generals        | `generals` | NOT freeware — local source only   |
 
@@ -52,7 +55,10 @@ source. Works as a standalone CLI tool or as a library for engine integration.
 | Source                           | Type          | Games                   |
 | -------------------------------- | ------------- | ----------------------- |
 | OpenRA HTTP mirrors              | Download      | RA, TD                  |
+| OpenRA community mirrors         | Download      | RA, TD, TS (music)      |
 | Archive.org / CNCNZ              | Download      | RA, TD                  |
+| cnc-comm.com disc ISOs           | Download      | TS                      |
+| CNCNet                           | Download      | RA, TD, TS              |
 | Allied / Soviet / CS / AM Discs  | Disc          | RA                      |
 | GDI / Nod / Covert Ops Discs     | Disc          | TD                      |
 | The First Decade DVD             | InstallShield | RA, RA2                 |
@@ -63,18 +69,23 @@ source. Works as a standalone CLI tool or as a library for engine integration.
 | C&C 1995 (registry)              | Registry      | RA                      |
 | Dune 2 / Dune 2000 Discs         | Disc          | Dune 2, Dune 2000       |
 | TS / RA2 / Generals Retail Discs | Disc          | TS, RA2, Gen            |
+| OpenRA content directory         | OpenRA        | RA, TD                  |
 
 \* Steam app IDs for TS, RA2, and Generals TUC are pending confirmation.
 
 ## Freeware Downloads
 
-EA declared Red Alert (2008) and Tiberian Dawn (2007) as freeware. These
-resources are available via HTTP mirrors and BitTorrent.
+EA declared Red Alert (2008), Tiberian Dawn (2007), and Tiberian Sun (2010)
+as freeware. These resources are available via P2P swarm (BitTorrent + HTTP
+web seeds) or direct multi-mirror HTTP.
 
-Every `.torrent` file embeds [BEP 19](https://www.bittorrent.org/beps/bep_0019.html)
-web seed URLs pointing to the HTTP mirrors. Downloads work **with zero
-BitTorrent peers** — the BT client fetches pieces directly from the mirrors
-via HTTP Range requests.
+**P2P-first architecture:** every `.torrent` file embeds
+[BEP 19](https://www.bittorrent.org/beps/bep_0019.html) web seed URLs
+pointing to HTTP mirrors. The P2P client treats HTTP mirrors and BitTorrent
+peers as equal piece sources. Downloads work **with zero BitTorrent peers**
+— the client fetches pieces directly from mirrors via Range requests. As the
+swarm grows, peers share pieces with each other automatically, reducing
+mirror load.
 
 ### Red Alert
 
@@ -104,15 +115,22 @@ via HTTP Range requests.
 | GDI Campaign Movies | ~250 MB | [mirror list][td-movies-gdi-http] | — |
 | Nod Campaign Movies | ~250 MB | [mirror list][td-movies-nod-http] | — |
 
-Every `.torrent` file contains [BEP 19](https://www.bittorrent.org/beps/bep_0019.html)
-web seed URLs. Open the `.torrent` in any BT client — it downloads via HTTP
-mirrors immediately, no peers required. As the swarm grows, peers share
-pieces with each other automatically.
+Packages showing "—" for Torrent need their `.torrent` file generated first.
 
-Packages showing "—" need their mirror infrastructure set up first.
-See the [content pipeline](AGENTS.md#p2p-content-pipeline-gap).
+### Tiberian Sun
 
-> **Dune 2, Dune 2000, Tiberian Sun, Red Alert 2, and Generals** are
+| Package | Size | HTTP | Torrent |
+| ------- | ---: | ---- | ------- |
+| Base Files | ~9 MB | [OpenRA mirrors][ts-base-http] | — |
+| Quick Install (Base + Expand) | ~12 MB | [OpenRA mirrors][ts-qi-http] | — |
+| Firestorm Expansion | ~3 MB | [OpenRA mirrors][ts-expand-http] | — |
+| GDI Disc ISO | ~549 MB | [cnc-comm.com][ts-gdi-http] | — |
+| Nod Disc ISO | ~550 MB | [cnc-comm.com][ts-nod-http] | — |
+| Firestorm Disc ISO | ~549 MB | [cnc-comm.com][ts-fs-http] | — |
+| Music | ~42 MB | [community mirrors][ts-music-http] | — |
+| Movies | ~1 GB | [mirror list][ts-movies-http] | — |
+
+> **Dune 2, Dune 2000, Red Alert 2, and Generals** are
 > NOT freeware. This crate supports local source extraction only for those
 > games — users must provide their own legally-obtained copies.
 
@@ -141,6 +159,15 @@ See the [content pipeline](AGENTS.md#p2p-content-pipeline-gap).
 [td-movies-gdi-http]: https://raw.githubusercontent.com/iron-curtain-engine/content-bootstrap/main/mirrors/td-movies-gdi.txt
 [td-movies-nod-http]: https://raw.githubusercontent.com/iron-curtain-engine/content-bootstrap/main/mirrors/td-movies-nod.txt
 
+[ts-base-http]: https://www.openra.net/packages/ts-mirrors.txt
+[ts-qi-http]: https://www.openra.net/packages/ts-quickinstall-mirrors.txt
+[ts-expand-http]: https://www.openra.net/packages/fs-mirrors.txt
+[ts-gdi-http]: https://bigdownloads.cnc-comm.com/ts/TS_GDI.zip
+[ts-nod-http]: https://bigdownloads.cnc-comm.com/ts/TS_Nod.zip
+[ts-fs-http]: https://bigdownloads.cnc-comm.com/ts/TS_Firestorm.zip
+[ts-music-http]: https://openra.baxxster.no/openra/ts-music.zip
+[ts-movies-http]: https://raw.githubusercontent.com/iron-curtain-engine/content-bootstrap/main/mirrors/ts-movies.txt
+
 <!-- ── Torrent file reference links ────────────────────────────────── -->
 <!-- Our generated .torrent files (GitHub Pages) contain BEP 19 web seeds -->
 <!-- so downloads work with zero BT peers via HTTP Range requests.        -->
@@ -158,6 +185,203 @@ See the [content pipeline](AGENTS.md#p2p-content-pipeline-gap).
 
 [ra-full-torrent]: https://archive.org/download/command-and-conquer-red-alert/command-and-conquer-red-alert_archive.torrent
 [ra-set-torrent]: https://archive.org/download/red_alert_cd/red_alert_cd_archive.torrent
+
+## Download Architecture
+
+Downloads use a **P2P-first** transport with multi-tier HTTP fallback:
+
+1. **P2P with web seeds (default)** — BitTorrent via `librqbit` behind the
+   `torrent` feature flag. HTTP mirrors serve as
+   [BEP 19](https://www.bittorrent.org/beps/bep_0019.html) web seeds in
+   the piece coordinator, so downloads work with **zero peers**. As real
+   peers join the swarm, pieces flow via P2P too, reducing mirror load.
+   Piece-level SHA-1 verification on every piece, regardless of source.
+
+2. **FlashGet-style segmented HTTP** — when P2P is unavailable, the file is
+   split into N segments (one per mirror, minimum 1 MB each) and each mirror
+   fetches its byte range concurrently via HTTP Range requests. Bandwidth is
+   aggregated across all mirrors.
+
+3. **Parallel mirror racing (last resort)** — if Range is unsupported or
+   only one mirror is available, all mirrors start concurrently and the first
+   successful complete download wins. Losers are cancelled.
+
+### Seeding Policies
+
+After download, the client can seed content back to the swarm:
+
+| Policy   | CLI flag   | Behavior                                         |
+| -------- | ---------- | ------------------------------------------------ |
+| `pause`  | `--seed pause`  | Seed when idle, pause during online play (default) |
+| `always` | `--seed always` | Seed continuously                                |
+| `keep`   | `--seed keep`   | Keep archives on disk but never upload           |
+| `delete` | `--seed delete` | Extract content, then delete archives            |
+
+## Archive Formats
+
+| Format | Extension | Games | Module |
+| ------ | --------- | ----- | ------ |
+| MIX (Westwood) | `.mix` | RA, TD, TS | `cnc-formats` |
+| BIG/BIG4 (EA) | `.big` | Generals | `cnc-formats` |
+| MEG (Petroglyph) | `.meg` | — (future) | `cnc-formats` |
+| BAG/IDX (RA2) | `.bag`/`.idx` | RA2 | `cnc-formats` |
+| InstallShield CAB v5/v6 | `.cab` | RA (TFD) | `iscab` |
+| ZIP (deflate) | `.zip` | RA, TD, TS | `zip` |
+| Raw byte offset | — | various | built-in |
+
+## p2p-distribute
+
+[`p2p-distribute`](crates/p2p-distribute/) is a **standalone, general-purpose**
+piece-level download coordinator. It is MIT/Apache-2.0 licensed and published
+as an independent crate.
+
+Any project that needs to coordinate piece-based downloads from multiple
+sources (HTTP mirrors, BitTorrent peers, custom transports) can use it
+directly.
+
+**Repository:** [`iron-curtain-engine/p2p-distribute`](https://github.com/iron-curtain-engine/p2p-distribute)
+
+### What it provides
+
+- **Piece coordinator** — schedules piece downloads across any number of
+  peers, with SHA-1 verification on every piece, retry rotation, peer
+  blacklisting, minimum-speed eviction, and endgame mode
+- **Streaming reader** — `Read + Seek` over partially-downloaded files,
+  blocking only when needed bytes haven't arrived yet. Enables video/audio
+  playback during download
+- **Pluggable peer trait** — the `Peer` trait abstracts any data source.
+  Built-in `WebSeedPeer` fetches via HTTP Range requests. Consumers bring
+  their own BitTorrent backend by implementing `Peer`
+- **Deterministic torrent creation** — generate `.torrent` files with
+  BEP 19 web seeds and tracker URLs. Same input = identical `info_hash`
+
+### Subsystems
+
+#### Peer Management
+
+| Component | Purpose |
+| --------- | ------- |
+| `PeerPool` | Bounded peer set (default 55) with exponential backoff reconnection |
+| `PeerStats` / `PeerTracker` | Composite scoring: Speed (0.4) + Reliability (0.3) + Availability (0.2) + Recency (0.1) |
+| `AffinityScorer` | Geographic/topological peer preference: Region (0.25) + Latency (0.40) + Speed (0.35) |
+| `PhiDetector` | Phi accrual failure detection (Cassandra/Akka pattern) for peer liveness |
+| `PeerId` | Cryptographic peer identity — auto-generated, SHA-256 derived, or Ed25519 |
+
+#### Piece Scheduling & Verification
+
+| Component | Purpose |
+| --------- | ------- |
+| `SharedPieceMap` | Atomic per-piece state tracking (`AtomicU8` per piece) |
+| `PieceSelection` | Rarest-first selection weighted by streaming priority |
+| `PiecePriority` | DASH/HLS-style streaming priority (Critical → High → Normal → Low) |
+| `EndgameMode` | BEP 3 endgame — broadcast remaining blocks, cancel duplicates |
+| `PieceValidator` | Extended validation with Merkle sub-piece localisation and quarantine |
+| `MerkleTree` | SHA-256 Merkle tree (256 KiB leaves) for sub-piece corruption localisation (aMule AICH) |
+| `CorruptionLedger` | Byte-range blame attribution to identify which peer sent corrupt data |
+
+#### Trust & Bandwidth
+
+| Component | Purpose |
+| --------- | ------- |
+| `TitForTatChoking` | BEP 3 tit-for-tat with optimistic unchoking and credit weighting |
+| `CreditLedger` | eMule bilateral credit system |
+| `BandwidthThrottle` | Global byte-volume token bucket (aria2 pattern) |
+| `RateLimiterMap` | Per-entity request-count rate limiting |
+| `ConnectionBudget` | libp2p-style limits: max total (50), per-peer (1), pending (10) |
+| `AdaptiveConcurrency` | FlashGet adaptive concurrency: ramp up on +10% throughput, back off -20% |
+
+#### Network & Discovery
+
+| Component | Purpose |
+| --------- | ------- |
+| `DhtNode` / `RoutingTable` | Kademlia DHT — O(log N) lookup, k=20 buckets, α=3 parallel queries |
+| `PexMessage` | BEP 11 Peer Exchange gossip |
+| `LpdService` | BEP 14 LAN multicast peer discovery |
+| `TrackerState` | BEP 3 HTTP + BEP 15 UDP tracker |
+| `SourceRegistry` | Pluggable source discovery with trust scoring and freshness |
+| `RelayNode` | CnCNet-inspired NAT traversal and connection relaying |
+| `NetworkId` | Network isolation tag (SSB Secret Handshake pattern) |
+
+#### Wire Protocol
+
+| Component | Purpose |
+| --------- | ------- |
+| `PeerMessage` | Full BEP 3 message codec (Choke, Unchoke, Have, Bitfield, Request, Piece, Cancel, etc.) |
+| `Capabilities` | IRC ISUPPORT-style capability bits (encryption, Merkle, PEX, DHT, web seeds, streaming) |
+| `FastMessage` | BEP 6 Fast Extension — SuggestPiece, HaveAll, HaveNone, RejectRequest, AllowedFast |
+| `MetadataExchange` | BEP 9 magnet URI metadata download |
+| `BencodeValue` | Zero-copy bencode codec with depth limit |
+
+#### Streaming & Gateway
+
+| Component | Purpose |
+| --------- | ------- |
+| `StreamingReader` | `Read + Seek` over partial downloads, condvar-based blocking |
+| `BandwidthEstimator` | Dual EWMA (fast α=0.5, slow α=0.1) for DASH-style adaptive prebuffering |
+| `BufferPolicy` | Controls how far ahead the P2P layer prefetches |
+| `GatewayAdapter` | Bridges HTTP Range requests to `StreamingReader` |
+| `RangeRequest` | RFC 7233 range parser for HTTP-to-P2P gateway |
+
+#### Bridge (P2P ↔ HTTP)
+
+| Component | Purpose |
+| --------- | ------- |
+| `BridgeNode` | P2P-to-HTTP bridge — participates in swarm, sources data from HTTP mirrors |
+| `BridgePeer` | Implements `Peer` trait backed by healthiest mirror, with prefetch |
+| `DemandTracker` | Exponential-decay heat tracking for proactive prefetch |
+| `PieceCache` | LRU piece cache for bridge nodes |
+| `PieceDataCache` | ARC (Adaptive Replacement Cache) for seeding — scan-resistant, default 32 MiB |
+
+#### Group Replication (Managed Content Distribution)
+
+| Component | Purpose |
+| --------- | ------- |
+| `GroupRoster` | Closed share group RBAC — Master, Admin, Mirror, Reader roles (max 500 members) |
+| `GroupManifest` | Versioned, signed content catalog (SHA-256 hashes, sorted by path) |
+| `CatalogSigner` / `CatalogVerifier` | Pluggable manifest signing (HMAC-SHA256 built-in) |
+| `SyncPlan` | Manifest diff → Download/Delete action plan |
+| `ReplicationPolicy` | Full mirror or prefix-filtered partial replication |
+
+#### Upload & Seeding
+
+| Component | Purpose |
+| --------- | ------- |
+| `UploadQueue` | XDCC-style bounded upload slots (default 4) + FIFO queue (default 20) |
+| `SuperSeedState` | BEP 16 super-seeding — maximise piece diversity from initial seeder |
+
+#### Storage & Resume
+
+| Component | Purpose |
+| --------- | ------- |
+| `FileStorage` / `MemoryStorage` | Pluggable piece storage via `PieceStorage` trait |
+| `CoalescingStorage` | Write-coalescing wrapper for sequential I/O |
+| `ResumeState` | Crash recovery — compact binary bitfield for download resume |
+| `BasicSession` | Multi-download queue with configurable concurrency (default 3 active) |
+
+#### Security
+
+| Component | Purpose |
+| --------- | ------- |
+| `ObfuscationKey` | eMule-style XOR stream masking + random port (anti-DPI) |
+| `WorkStealingScheduler` | Lock-free atomic byte-range bisection for parallel downloads |
+
+### Design inspiration
+
+`p2p-distribute` draws from proven P2P protocols and networking patterns:
+
+| Pattern | Origin | Used in |
+| ------- | ------ | ------- |
+| Tit-for-tat + optimistic unchoke | BitTorrent BEP 3 | `choking` |
+| AICH corruption localisation | aMule/eMule | `merkle`, `corruption_ledger` |
+| Bilateral credit | eMule | `credit` |
+| Phi accrual failure detector | Cassandra/Akka | `phi_detector` |
+| ARC cache | Megiddo & Modha 2003 | `piece_data_cache` |
+| Adaptive concurrency | FlashGet | `adaptive` |
+| NAT traversal relays | CnCNet | `relay` |
+| Key-as-identity | Hamachi | `peer_id` |
+| Network isolation | SSB Secret Handshake | `network_id` |
+| XDCC slot queuing | IRC XDCC bots | `upload_queue` |
+| Connection budget | libp2p | `budget` |
 
 ## Installation
 
@@ -186,6 +410,7 @@ cnc-content download                  # download all required content
 cnc-content download --all            # download required + optional (music, movies)
 cnc-content download --package music  # download a specific package
 cnc-content -g td download            # download Tiberian Dawn content
+cnc-content -g ts download            # download Tiberian Sun content
 cnc-content verify                    # check installed content integrity
 cnc-content detect                    # scan for local content sources
 cnc-content install /path/to/source   # install from a local disc/Steam/GOG path
@@ -200,7 +425,8 @@ cnc-content torrent-create            # generate .torrent files (maintainer tool
 ### Global Options
 
 ```
--g, --game <SLUG>      Game to manage (ra, td, dune2, dune2000) [default: ra]
+-g, --game <SLUG>      Game to manage [default: ra]
+                       (ra, td, ts, dune2, dune2000, ra2, generals)
 --content-dir <PATH>   Content directory override
                        (default: portable, next to executable)
                        (env: CNC_CONTENT_ROOT)
@@ -232,12 +458,12 @@ if !cnc_content::is_content_complete(root, GameId::RedAlert) {
 
 ## Features
 
-| Feature       | Default | Description                                                  |
-| ------------- | ------- | ------------------------------------------------------------ |
-| `cli`         | Yes     | `cnc-content` binary with progress bars (implies `download`) |
-| `download`    | Yes     | HTTP download + ZIP extraction (`ureq`, `zip`)               |
-| `fast-verify` | Yes     | Parallel SHA-256 verification via `rayon` + SIMD bitfields   |
-| `torrent`     | No      | BitTorrent P2P transport via `librqbit`                      |
+| Feature       | Default | Description                                                    |
+| ------------- | ------- | -------------------------------------------------------------- |
+| `cli`         | Yes     | `cnc-content` binary with progress bars (implies `download`)   |
+| `download`    | Yes     | HTTP download + ZIP extraction (`ureq`, `zip`)                 |
+| `fast-verify` | Yes     | Parallel BLAKE3 verification via `rayon` + SIMD bitfields      |
+| `torrent`     | No      | BitTorrent P2P transport via `librqbit` (implies `download`)   |
 
 ## Environment Variables
 
@@ -255,21 +481,28 @@ CLI flags take precedence over environment variables.
 This crate is part of the [Iron Curtain](https://github.com/iron-curtain-engine/iron-curtain)
 engine ecosystem but works standalone without any game engine dependency.
 
-It depends on [`cnc-formats`](https://github.com/iron-curtain-engine/cnc-formats)
-(MIT/Apache-2.0) for binary format parsing (MIX archives). This crate itself
-is GPL-3.0-or-later because it implements game-specific content management
-logic that may reference EA-derived knowledge (file layouts, content
-definitions from OpenRA's GPL-licensed data).
+Dependencies:
+- [`cnc-formats`](https://github.com/iron-curtain-engine/cnc-formats)
+  (MIT/Apache-2.0) — binary format parsing (MIX, BIG, MEG, BAG/IDX archives)
+- [`p2p-distribute`](https://github.com/iron-curtain-engine/p2p-distribute)
+  (MIT/Apache-2.0) — piece-level download coordination, streaming, P2P transport
+
+This crate itself is GPL-3.0-or-later because it implements game-specific
+content management logic that references EA-derived knowledge (file layouts,
+content definitions from OpenRA's GPL-licensed data).
 
 ### Key properties
 
 - **No Bevy dependency** — pure Rust library, usable by any project
+- **P2P-first** — BitTorrent swarm with HTTP web seeds as equal piece sources
 - **Offline-first** — content is cached locally after first download
 - **OpenRA-compatible** — uses the same mirror infrastructure and file layout
 - **Feature-gated networking** — `download` feature pulls in `ureq` + `zip`;
   disable it for library-only use without HTTP dependencies
-- **Freeware-only downloads** — only EA-declared freeware (RA, TD) can be
+- **Freeware-only downloads** — only EA-declared freeware (RA, TD, TS) can be
   downloaded; all other games require user-owned copies
+- **Streaming playback** — video and audio content can be played during
+  download via `p2p-distribute`'s `StreamingReader`
 
 ## Design Documents
 
@@ -291,3 +524,23 @@ to your commit messages (`git commit -s`).
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in this crate by you shall be licensed under GPL-3.0-or-later,
 without any additional terms or conditions.
+
+## Legal Notices
+
+This project is **not affiliated with, endorsed by, or sponsored by Electronic
+Arts Inc.** or any of its subsidiaries.
+
+Command & Conquer™, Red Alert™, Tiberian Dawn™, Tiberian Sun™, Dune™,
+Red Alert 2™, and Generals™ are trademarks or registered trademarks of
+Electronic Arts Inc. All other trademarks are the property of their respective
+owners. These names are used solely for identification and interoperability
+purposes under nominative fair use.
+
+This software ships **zero copyrighted game content**. It downloads content
+that EA has publicly declared freeware, or extracts content from
+user-owned copies. Users are responsible for ensuring their use complies
+with applicable laws in their jurisdiction.
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. See the
+[GNU General Public License v3.0](LICENSE) for full warranty disclaimer and
+limitation of liability terms (sections 15–17).

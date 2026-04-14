@@ -10,6 +10,8 @@ ignore = [
     "RUSTSEC-2025-0141", # bincode (unmaintained) — via librqbit
     "RUSTSEC-2025-0060", # crypto-hash (unmaintained) — via librqbit
     "RUSTSEC-2024-0384", # instant (unmaintained) — via backoff via librqbit
+    "RUSTSEC-2026-0097", # rand unsoundness with custom logger — via librqbit;
+    # cnc-content does not use a custom logger with rand::rng()
 ]
 
 [licenses]

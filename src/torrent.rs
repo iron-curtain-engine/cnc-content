@@ -8,7 +8,10 @@
 //!
 //! ## Design (per Iron Curtain design docs, D049)
 //!
-//! - **Size strategy**: <5 MB → HTTP only; 5–50 MB → P2P+HTTP concurrent; >50 MB → P2P preferred
+//! - **P2P-first**: P2P is always preferred when torrent metadata exists
+//!   (no size gate). HTTP mirrors serve as BEP 19 web seeds within the
+//!   same piece coordinator. If P2P fails at runtime, automatic fallback
+//!   to HTTP-only (FlashGet-style segmented parallel download).
 //! - Clients automatically seed downloaded content (opt-out, configurable speed caps)
 //! - SHA-256 verification after download
 //! - Rarest-first piece selection, endgame mode for stall prevention
@@ -76,6 +79,12 @@ impl Default for TorrentConfig {
             .parent()
             .map(|p| p.join("downloads"))
             .unwrap_or_else(|| PathBuf::from("downloads"));
+        // Use a random ephemeral port (49152–65535) instead of the
+        // well-known BitTorrent port 6881, which is trivially identified
+        // and throttled by ISP DPI. This follows the eMule lesson: fixed
+        // ports are a blocking target.
+        let listen_port = random_listen_port();
+
         Self {
             max_upload_speed: 1_048_576, // 1 MB/s
             max_download_speed: 0,       // unlimited
@@ -83,7 +92,7 @@ impl Default for TorrentConfig {
             session_dir,
             archive_dir,
             enable_dht: true,
-            listen_port: 6881,
+            listen_port,
         }
     }
 }
@@ -181,16 +190,17 @@ impl TorrentDownloader {
         content_root: &Path,
         on_progress: &mut dyn FnMut(TorrentProgress),
     ) -> Result<PathBuf, TorrentError> {
-        if package.info_hash.is_empty() {
-            return Err(TorrentError::NoTorrentMetadata);
-        }
+        let info_hash = match package.info_hash.as_deref() {
+            Some(hash) => hash,
+            None => return Err(TorrentError::NoTorrentMetadata),
+        };
 
         std::fs::create_dir_all(content_root)?;
 
         let output_dir = &self.config.archive_dir;
 
         // Build magnet URI from info hash and trackers.
-        let mut magnet = format!("magnet:?xt=urn:btih:{}", package.info_hash);
+        let mut magnet = format!("magnet:?xt=urn:btih:{info_hash}");
         // Add display name for tracker announces.
         magnet.push_str("&dn=");
         magnet.push_str(&urlencoding::encode(&package.title));
@@ -251,7 +261,7 @@ impl TorrentDownloader {
 
     /// Returns whether this downloader can handle a given package (has info_hash).
     pub fn can_download(package: &crate::DownloadPackage) -> bool {
-        !package.info_hash.is_empty()
+        package.info_hash.is_some()
     }
 
     /// Returns the current seeding policy.
@@ -294,17 +304,15 @@ impl TorrentDownloader {
     }
 }
 
-/// Determines whether a package should prefer P2P based on size.
+/// Determines whether a package has P2P metadata available.
 ///
-/// Per design docs D049:
-/// - <5 MB: HTTP only
-/// - 5–50 MB: P2P + HTTP concurrent
-/// - >50 MB: P2P preferred
+/// Returns `true` when the package has a non-empty `info_hash`, meaning
+/// torrent metadata exists and P2P download is possible. P2P is always
+/// preferred — HTTP mirrors participate as BEP 19 web seeds within the
+/// swarm, so even with zero BT peers the download works via mirrors
+/// serving pieces through Range requests.
 pub fn should_use_p2p(package: &crate::DownloadPackage) -> bool {
-    if package.info_hash.is_empty() {
-        return false;
-    }
-    package.size_hint >= 5_000_000
+    package.info_hash.is_some()
 }
 
 // ── Coordinator integration ─────────────────────────────────────────
@@ -349,9 +357,10 @@ pub fn resolve_and_start(
     package: &crate::DownloadPackage,
     config: &TorrentConfig,
 ) -> Result<ResolvedTorrent, TorrentError> {
-    if package.info_hash.is_empty() {
-        return Err(TorrentError::NoTorrentMetadata);
-    }
+    let info_hash = match package.info_hash.as_deref() {
+        Some(hash) => hash,
+        None => return Err(TorrentError::NoTorrentMetadata),
+    };
 
     std::fs::create_dir_all(&config.session_dir)?;
     std::fs::create_dir_all(&config.archive_dir)?;
@@ -380,7 +389,7 @@ pub fn resolve_and_start(
     })?;
 
     // ── Build magnet URI from info hash + trackers ──────────────────
-    let mut magnet = format!("magnet:?xt=urn:btih:{}", package.info_hash);
+    let mut magnet = format!("magnet:?xt=urn:btih:{info_hash}");
     magnet.push_str("&dn=");
     magnet.push_str(&urlencoding::encode(&package.title));
 
@@ -465,4 +474,29 @@ fn default_session_dir() -> PathBuf {
     app_path::try_app_path!(".torrent-session")
         .map(|p| p.into_path_buf())
         .unwrap_or_else(|_| PathBuf::from(".torrent-session"))
+}
+
+/// Selects a random listen port in the IANA ephemeral range (49152–65535).
+///
+/// Avoids the well-known BitTorrent port range (6881–6889) which is
+/// trivially identified and throttled by ISP DPI. This follows the eMule
+/// lesson: fixed ports are the easiest blocking vector.
+///
+/// Uses a hash of the current time and process ID for unpredictability.
+/// Not cryptographic, but sufficient for port selection where the goal
+/// is avoiding predictable well-known ports.
+fn random_listen_port() -> u16 {
+    use std::hash::{Hash, Hasher};
+
+    const EPHEMERAL_MIN: u16 = 49152;
+    const EPHEMERAL_MAX: u16 = 65535;
+
+    // Hash current time + process ID for a unique-per-invocation port.
+    let mut hasher = std::hash::DefaultHasher::new();
+    std::time::SystemTime::now().hash(&mut hasher);
+    std::process::id().hash(&mut hasher);
+    let hash = hasher.finish();
+
+    let range = (EPHEMERAL_MAX - EPHEMERAL_MIN).saturating_add(1) as u64;
+    EPHEMERAL_MIN.saturating_add((hash % range) as u16)
 }

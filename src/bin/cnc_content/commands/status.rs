@@ -15,7 +15,7 @@ pub fn cmd_games() {
             GameId::TiberianDawn => "Freeware (EA, 2007) — downloadable",
             GameId::Dune2 => "NOT freeware — local source only",
             GameId::Dune2000 => "NOT freeware — local source only",
-            GameId::TiberianSun => "NOT freeware — local source only",
+            GameId::TiberianSun => "Freeware (EA, 2010) — downloadable",
             GameId::RedAlert2 => "NOT freeware — local source only",
             GameId::Generals => "NOT freeware — local source only",
         };

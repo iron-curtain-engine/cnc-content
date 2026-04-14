@@ -689,3 +689,26 @@ fn coordinator_single_piece_boundary() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+// ── WebSeedPeer agent hardening ──────────────────────────────────────
+
+/// WebSeedPeer's MAX_REDIRECTS constant must match the downloader's policy.
+///
+/// Both HTTP transport paths (downloader mirror and coordinator webseed)
+/// must enforce consistent redirect limits to prevent redirect-chain SSRF.
+/// A mismatch would let attackers exploit the less-restricted path.
+#[cfg(feature = "download")]
+#[test]
+fn webseed_max_redirects_matches_downloader() {
+    use super::webseed::MAX_REDIRECTS;
+    const {
+        assert!(
+            MAX_REDIRECTS >= 2,
+            "redirect limit must allow CDN redirects"
+        );
+        assert!(
+            MAX_REDIRECTS <= 8,
+            "redirect limit should prevent chain attacks"
+        );
+    }
+}

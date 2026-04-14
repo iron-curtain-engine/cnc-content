@@ -84,10 +84,10 @@ project that needs to manage C&C game content.
 Key responsibilities:
 - Define what each game needs (RA, TD, Dune 2, Dune 2000, TS, RA2, Generals)
 - Identify content sources on disk (discs, Steam, Origin installs)
-- Download freeware content via HTTP mirrors (RA and TD only)
+- Download freeware content via HTTP mirrors (RA, TD, and TS)
 - Extract content from MIX archives, ZIPs, raw offsets
-- Verify source identity (SHA-1) and installed integrity (SHA-256)
-- Support local source extraction for non-freeware games (Dune 2, Dune 2000, TS, RA2, Generals)
+- Verify source identity (SHA-1) and installed integrity (BLAKE3)
+- Support local source extraction for non-freeware games (Dune 2, Dune 2000, RA2, Generals)
 
 ## Critical Rules for This Crate
 
@@ -213,7 +213,7 @@ src/
   query.rs            — convenience lookup/filter functions (re-exported from lib.rs)
   actions.rs          — InstallAction enum (Copy, ExtractMix, ExtractZip, ExtractBig, ExtractMeg, ExtractBagIdx, etc.)
   config.rs           — Config persistence (TOML), SeedingPolicy, speed limits
-  downloads.rs        — HTTP download definitions (16 packages, RA + TD only)
+  downloads.rs        — HTTP download definitions (23 packages, RA + TD + TS), compiled_mirrors()
   packages.rs         — Content package definitions (25 packages, 7 games)
   sources.rs          — Content source definitions (36 sources with SHA-1 IDFiles)
   torrent_create.rs   — Deterministic .torrent file generation (bencode, info hash)
@@ -223,6 +223,7 @@ src/
   executor/
     mod.rs            — Install recipe executor (MIX, ISCAB, ZIP, raw, copy, delete)
     tests.rs          — executor unit and path-traversal security tests
+  ffi.rs              — C-compatible FFI surface for non-Rust consumers (feature-gated: ffi)
   iscab/
     mod.rs            — InstallShield CAB v5/v6 archive reader (zlib decompression)
     tests.rs          — iscab unit tests
@@ -236,7 +237,7 @@ src/
     tests.rs          — streaming unit tests
   torrent.rs          — P2P BitTorrent transport via librqbit (feature-gated: torrent)
   verify/
-    mod.rs            — Source identification + installed content verification (SHA-1/SHA-256)
+    mod.rs            — Source identification + installed content verification (SHA-1/BLAKE3)
     tests.rs          — verify unit tests
   tests/
     mod.rs            — Cross-module integration test root
@@ -267,7 +268,8 @@ src/
    modules are not needed yet. When any file exceeds ~600 lines, split it
    into a directory module (`foo/mod.rs` + `foo/tests.rs`).
 2. **Feature gates** — networking code (`downloader.rs`) is behind the
-   `download` feature. CLI code is behind the `cli` feature.
+   `download` feature. CLI code is behind the `cli` feature. The C FFI
+   surface (`ffi.rs`) is behind the `ffi` feature (which implies `download`).
 3. **Const data** — package, source, and download definitions are `const`
    static data, not deserialized from config files. This ensures compile-time
    correctness.
@@ -318,7 +320,8 @@ Current external files:
 ```
 data/
   trackers.txt   — BitTorrent tracker announce URLs (5 trackers)
-  downloads.toml — Download manifest (18 packages, include_str! + LazyLock)
+  downloads.toml — Download manifest (26 packages, include_str! + LazyLock)
+                   Includes `mirrors` arrays updated by GH Action
   torrents/      — Pre-generated .torrent files (8 files, include_bytes!)
 ```
 
@@ -812,19 +815,88 @@ Steps performed (in order):
 The design docs (D049) specify concurrent multi-transport downloads where
 HTTP mirrors and BitTorrent peers aggregate bandwidth simultaneously.
 
-**Current implementation:**
+**Transport priority (P2P-first):**
 
-1. **Parallel mirror racing** — all mirrors start concurrently, first
-   successful download wins, losers are cancelled via `AtomicBool`.
-   Single-URL downloads skip the thread pool overhead. Implemented in
-   `downloader.rs::parallel_download()`.
-2. **Sequential fallback** — single-URL paths use simple sequential I/O.
-3. **P2P distribution** — BitTorrent via `librqbit` behind the `torrent`
-   feature flag. Uses magnet URIs with public trackers from
-   `data/trackers.txt`. Active when packages have populated `info_hash`
-   fields.
+1. **P2P with web seeds (default)** — BitTorrent via `librqbit` behind the
+   `torrent` feature flag. HTTP mirrors serve as BEP 19 web seeds in the
+   same piece coordinator, so downloads work with **zero BitTorrent peers**
+   — the BT client fetches pieces directly from HTTP mirrors via Range
+   requests. As real peers join the swarm, pieces flow via P2P too, reducing
+   mirror load. Uses magnet URIs with public trackers from
+   `data/trackers.txt`. Active whenever a package has a non-empty
+   `info_hash` field — there is no size gate.
+2. **FlashGet-style segmented HTTP (degraded fallback)** — when P2P is
+   unavailable (no `info_hash`, `torrent` feature not compiled, or
+   `CNC_NO_P2P=1`), the file is split into N segments (one per mirror,
+   minimum 1 MB each) and each mirror fetches its byte range concurrently
+   via HTTP Range requests. Bandwidth is aggregated across all mirrors.
+   Falls back to parallel mirror racing if the server does not support
+   Range (no 206 response). Implemented in `mirror.rs::segmented_download()`.
+3. **Parallel mirror racing (last resort)** — if Range is unsupported or
+   only one mirror is available, all mirrors start concurrently and the
+   first successful complete download wins. Losers are cancelled via
+   `AtomicBool`. Implemented in `mirror.rs::parallel_download()`.
 
-The sequential fallback is always available as the reliability baseline.
+HTTP-only paths (tiers 2–3) are **degraded fallback only**. P2P is always
+preferred when the package metadata supports it.
+
+## Mirror Management (Single Source of Truth)
+
+`data/downloads.toml` is the **single source of truth** for all external
+URLs: `mirror_list_url`, `direct_urls`, `web_seeds`, and `trackers`.
+Mirror cache files and IoC validation derive from this file — nothing is
+hardcoded elsewhere.
+
+### Architecture
+
+1. **Modifiable references** — each package's `mirror_list_url` field in
+   `data/downloads.toml` points to the upstream mirror list file
+   (raw.githubusercontent.com). OpenRA packages point to the
+   [OpenRA/OpenRAWebsiteV3](https://github.com/OpenRA/OpenRAWebsiteV3)
+   repo. IC-hosted packages use empty `mirror_list_url` — their mirrors
+   are populated directly in the `mirrors` array (GitHub Release URLs
+   on `cnc-content`, community mirrors, etc.).
+   These URLs are the single source of truth — if upstream restructures,
+   update them in downloads.toml.
+
+2. **Compile-time mirror cache** — each `[[download]]` entry in
+   `data/downloads.toml` has a `mirrors` array of known-good URLs,
+   exposed via `downloads::compiled_mirrors()`. These provide a
+   tamper-proof baseline that works even when the runtime fetch fails.
+   No separate cache files — everything lives in `downloads.toml`.
+
+3. **Automated refresh** — `.github/workflows/update-mirrors.yml` runs
+   weekly. It reads `data/downloads.toml` for all non-empty
+   `mirror_list_url` entries, fetches each, and updates the `mirrors`
+   array in-place using `tomlkit` (formatting-preserving TOML edits).
+   Fetch failures are non-fatal (IC-hosted mirrors return 404 until
+   infrastructure is live). Opens a PR only if `downloads.toml` changed
+   and IoC validation passes.
+
+4. **IoC validation** — before any PR is created, **every external
+   domain** across all data files is checked against threat intelligence
+   databases. Domain sources: `data/downloads.toml` (all URL fields
+   including `mirrors`), `data/trackers.txt` (BitTorrent trackers).
+   Three layers:
+   - **Layer 1 (DNS blocklists):** Spamhaus DBL + SURBL via DNS lookup.
+     Always runs, no API key needed.
+   - **Layer 2 (URLhaus / abuse.ch):** Host lookup against URLhaus DB
+     with server-side Spamhaus DBL + SURBL cross-check. Requires free
+     `URLHAUS_AUTH_KEY` secret (get from `https://auth.abuse.ch/`).
+   - **Layer 3 (Google Safe Browsing v4):** Batch URL check for malware,
+     social engineering, unwanted software, phishing. Requires free
+     `GOOGLE_SAFE_BROWSING_KEY` secret.
+   Layers 2 and 3 are optional — they skip with a notice if the
+   corresponding secret is not configured. A flagged URL in any layer
+   fails the workflow and blocks the PR.
+
+5. **Runtime supplement** — the runtime mirror list fetch still runs at
+   download time and adds any mirrors that appeared since the last
+   binary release. Compiled mirrors take priority.
+
+**Mirror URL resolution order:** compiled mirrors → runtime mirror list →
+direct URLs. These URLs serve as BEP 19 web seeds in P2P mode, or as
+download sources for segmented/parallel HTTP fallback.
 
 ## URL and Domain Integrity
 
@@ -834,61 +906,74 @@ resource. Do not invent domains or URLs that do not exist.
 **Known-live domains:**
 - `www.openra.net` — OpenRA mirror list infrastructure (verified)
 - `files.cncnz.com` — CNCNZ community file archive (RA + TD freeware ISOs)
-- `raw.githubusercontent.com` — GitHub raw content (bootstrap repo)
+- `bigdownloads.cnc-comm.com` — cnc-comm.com large file CDN (TS freeware disc ISOs)
+- `raw.githubusercontent.com` — GitHub raw content (OpenRA mirror lists)
+- `github.com` — GitHub Releases (cnc-content release assets for IC-hosted freeware)
 - `archive.org` — Internet Archive, non-profit digital library (freeware C&C ISOs)
 - `downloads.cncnet.org` — CNCNet community hub (freeware game installers)
 - `cdn.mailaender.name` — Community-hosted OpenRA content mirror (direct fallback)
 - `openra.0x47.net` — Community-hosted OpenRA content mirror (direct fallback)
+- `openra.baxxster.no` — Community-hosted OpenRA content mirror
+- `openra.ppmsite.com` — Community-hosted OpenRA content mirror
+- `republic.community` — Community-hosted OpenRA content mirror
+- `srvdonate.ut.mephi.ru` — Community-hosted OpenRA content mirror (TD/RA-full)
 
-**Bootstrap repo:** `iron-curtain-engine/content-bootstrap` on GitHub hosts
-mirror list files for IC-hosted freeware content. Mirror lists are served
-via `raw.githubusercontent.com`. All IC-hosted download packages point to
-mirror list files in this repo. Mirror lists may be empty (no mirrors
-populated yet) but the files and URLs must exist.
+IC-hosted freeware content (movies, music, expansion ZIPs) is hosted
+as GitHub Release assets on the `cnc-content` repo. Release asset URLs
+are added to the `mirrors` array in `downloads.toml` once content ZIPs
+are built and uploaded.
 
 ## Current Implementation Status
 
-- Content manifest data: **complete** (25 packages, 36 sources, 16 downloads across 7 games)
+- Content manifest data: **complete** (25 packages, 36 sources, 23 downloads across 7 games)
 - Install actions: **complete** (Copy, ExtractMix, ExtractMixFromContent, ExtractIscab, ExtractZip, ExtractRaw, Delete, ExtractBig, ExtractMeg, ExtractBagIdx)
 - HTTP downloader: **complete** (parallel mirror racing + SHA-1 verification)
-- Content verification: **complete** (SHA-256 manifest generation + verification)
+- Content verification: **complete** (BLAKE3 manifest generation + verification)
 - Source probes: **complete** (Steam VDF, Origin/EA App, GOG Galaxy/classic, Windows registry, OpenRA, disc/ISO)
-- P2P distribution: **partially seeded** (torrent.rs with librqbit behind `torrent` feature flag; 8 of 18 packages have embedded `.torrent` files with BEP 19 web seeds — see "P2P Content Pipeline Gap" below)
+- P2P distribution: **pre-configured torrents with web seeds** (torrent.rs with librqbit behind `torrent` feature flag; embedded `.torrent` files contain BEP 19 web seed URLs pointing to HTTP mirrors — downloads work with zero BT peers, swarm grows as users seed)
 - Parallel downloads: **complete** (multi-mirror racing via thread pool; single-URL fast path)
 - InstallShield CAB: **complete** (iscab.rs reader for v5/v6 archives, zlib decompression)
 - Setup wizard UI: lives in ic-game, not this crate
-- Freeware-only downloads: **enforced** (Dune 2 and Dune 2000 are local-source-only)
+- Freeware-only downloads: **enforced** (Dune 2, Dune 2000, RA2, and Generals are local-source-only)
 
-## P2P Content Pipeline Gap
+## P2P Distribution (Pre-Configured Torrents with Web Seeds)
 
-The torrent code (`torrent.rs`) is feature-complete: magnet URI construction,
-`librqbit` session management, public tracker list from `data/trackers.txt`,
-size-based transport selection (D049 strategy).
-
-**Current state:** 8 of 18 packages have populated `info_hash` values and
-embedded `.torrent` files (4 RA + 4 TD). The remaining 10 are either
-Archive.org-hosted (use their own torrents) or IC-hosted (mirror
-infrastructure not yet live).
-
-### Embedded `.torrent` Files
-
-Pre-generated `.torrent` files are stored in `data/torrents/` and embedded
-at compile time via `include_bytes!` in `src/downloads.rs`. Each file
+Every downloadable package ships with a pre-configured `.torrent` file
+embedded in the binary (`data/torrents/`, `include_bytes!`). Each torrent
 contains:
 
 - Full BitTorrent metadata (piece hashes, file size, name)
 - BEP 19 `url-list` web seed URLs pointing to HTTP mirrors
 - Public tracker announce URLs from `data/trackers.txt`
 
-This means downloads work with **zero BitTorrent peers** — BT clients
-fetch pieces directly from HTTP mirrors via Range requests. As users
-share the torrent, pieces flow via P2P too, reducing mirror load.
+### How it works
 
-Access via: `cnc_content::embedded_torrent(id)` → `Option<&'static [u8]>`.
+1. **P2P-first** — the client loads the embedded `.torrent` and starts
+   downloading via librqbit. HTTP mirrors serve as BEP 19 web seeds,
+   so downloads work with **zero BitTorrent peers** — the BT client
+   fetches pieces directly from mirrors via Range requests.
+2. **Users seed** — after download, librqbit continues seeding. The
+   `SeedingPolicy` controls behavior: seed always, pause during online
+   play (default), keep archives but don't seed, or extract and delete.
+3. **Swarm grows** — as more users download and seed, pieces flow via
+   P2P, reducing mirror load. The swarm is self-sustaining.
+4. **HTTP fallback** — if P2P is unavailable (no `torrent` feature,
+   `CNC_NO_P2P=1`, or all peers blocked), the FlashGet-style segmented
+   HTTP downloader handles it. No seeding occurs on this degraded path.
+
+Access embedded torrents via: `cnc_content::embedded_torrent(id)` →
+`Option<&'static [u8]>`.
+
+### `create_torrent` — Maintainer Tool
+
+`create_torrent()` (from `p2p-distribute`) is a **maintainer tool** for
+generating `.torrent` files to embed in the binary. It is fully
+deterministic: same file content + same piece size + same filename =
+identical `info_hash`. It is **not** called by end users at runtime.
 
 ### Torrent Generation Workflow
 
-To add or update `.torrent` files:
+To add or update embedded `.torrent` files:
 
 1. **Ensure mirrors are live** — every URL in the package's `web_seeds`
    field must serve the exact file that will be hashed. BEP 19 web seeds
@@ -901,23 +986,14 @@ To add or update `.torrent` files:
    This downloads each available package, hashes pieces, embeds web seeds
    and trackers, and writes `.torrent` files.
 
-3. **Copy to docs for GitHub Pages:**
-   ```sh
-   cp data/torrents/*.torrent docs/torrents/
-   ```
-
-4. **Update `data/downloads.toml`** — set the `info_hash` field for each
+3. **Update `data/downloads.toml`** — set the `info_hash` field for each
    package to the hex-encoded SHA-1 of the torrent's info dictionary
    (printed by `torrent-create`).
 
-5. **Add `include_bytes!` entry** — in `src/downloads.rs`, add a match
+4. **Add `include_bytes!` entry** — in `src/downloads.rs`, add a match
    arm in `embedded_torrent()` for the new `DownloadId`.
 
-6. **Update tests** — add the new `DownloadId` to the
-   `embedded_torrent_present_for_generated_packages` test in
-   `src/tests/downloads.rs`.
-
-7. **Verify:**
+5. **Verify:**
    ```sh
    cargo test
    cargo clippy --all-features --tests -- -D warnings
@@ -931,13 +1007,6 @@ If a package has multiple `direct_urls` that serve different file formats
 (e.g. ZIP vs ISO), only the URL whose output was hashed into the torrent
 may appear in `web_seeds`. Mismatched URLs cause piece verification
 failures in BT clients.
-
-### Remaining Pipeline Work
-
-**IC-hosted content** (RA music, movies, expansion music) requires the
-`content-bootstrap` repo's mirror list files to be populated with actual
-mirror URLs before torrents can be generated. Currently these mirror
-lists return 404.
 
 ## Execution Overlay Mapping
 

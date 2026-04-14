@@ -47,6 +47,49 @@ pub(super) static RA2_MUSIC_COPY: [FileMapping; 1] = [FileMapping {
     to: "theme.mix",
 }];
 
+/// RA2 movies — direct copy (Steam/Origin TUC, lowercase filenames).
+pub(super) static RA2_MOVIES_COPY: [FileMapping; 1] = [FileMapping {
+    from: "ra2.vqa",
+    to: "ra2.vqa",
+}];
+
+/// RA2 base game files — disc and TFD layout (uppercase filenames).
+///
+/// The retail disc and The First Decade DVD store MIX archives with
+/// uppercase DOS names, unlike the lowercase Steam/Origin TUC builds.
+pub(super) static RA2_DISC_BASE_COPY: [FileMapping; 3] = [
+    FileMapping {
+        from: "RA2.MIX",
+        to: "ra2.mix",
+    },
+    FileMapping {
+        from: "LANGUAGE.MIX",
+        to: "language.mix",
+    },
+    FileMapping {
+        from: "MULTI.MIX",
+        to: "multi.mix",
+    },
+];
+
+/// Yuri's Revenge — disc / TFD layout (uppercase filenames).
+pub(super) static RA2_DISC_YR_COPY: [FileMapping; 2] = [
+    FileMapping {
+        from: "RA2MD.MIX",
+        to: "ra2md.mix",
+    },
+    FileMapping {
+        from: "LANGMD.MIX",
+        to: "langmd.mix",
+    },
+];
+
+/// RA2 movies — disc / TFD layout (uppercase filenames).
+pub(super) static RA2_DISC_MOVIES_COPY: [FileMapping; 1] = [FileMapping {
+    from: "RA2.VQA",
+    to: "ra2.vqa",
+}];
+
 // ══════════════════════════════════════════════════════════════════════
 //  C&C Generals file mappings — Steam / Origin TUC layout
 // ══════════════════════════════════════════════════════════════════════
@@ -68,5 +111,21 @@ pub(super) static GEN_BASE_COPY: [FileMapping; 3] = [
     FileMapping {
         from: "W3D.big",
         to: "W3D.big",
+    },
+];
+
+/// Zero Hour BIG archives — disc only.
+///
+/// The retail Zero Hour disc has standalone expansion archives. The
+/// Steam/Origin TUC merges these into the base archives, so this
+/// mapping is only used for the `GenZhDisc` source.
+pub(super) static GEN_ZH_COPY: [FileMapping; 2] = [
+    FileMapping {
+        from: "INIZH.big",
+        to: "INIZH.big",
+    },
+    FileMapping {
+        from: "W3DZH.big",
+        to: "W3DZH.big",
     },
 ];

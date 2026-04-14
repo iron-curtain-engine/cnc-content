@@ -56,6 +56,18 @@ impl WebSeedPeer {
         }
     }
 
+    /// Creates multiple independent web seed peers pointing at the same URL.
+    ///
+    /// Each peer maintains its own HTTP connection and speed estimate, giving
+    /// the coordinator N independent peers to choose from. When multi-threaded
+    /// piece fetching lands, this enables parallel downloads from a single
+    /// mirror.
+    ///
+    /// Returns an empty `Vec` if `count` is zero.
+    pub fn with_connections(url: String, count: usize) -> Vec<Self> {
+        (0..count).map(|_| Self::new(url.clone())).collect()
+    }
+
     /// Returns the URL of this web seed.
     pub fn url(&self) -> &str {
         &self.url
@@ -346,5 +358,39 @@ mod tests {
     fn webseed_is_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<WebSeedPeer>();
+    }
+
+    // ── Multi-connection factory ────────────────────────────────────
+
+    /// `with_connections` creates the requested number of independent peers.
+    ///
+    /// Each peer is a separate instance with its own speed estimate,
+    /// enabling retry rotation across connections to the same mirror.
+    #[test]
+    fn with_connections_creates_n_peers() {
+        let peers = WebSeedPeer::with_connections("https://example.com/f.zip".into(), 3);
+        assert_eq!(peers.len(), 3);
+        for peer in &peers {
+            assert_eq!(peer.url(), "https://example.com/f.zip");
+            assert_eq!(peer.speed_estimate(), 0);
+        }
+    }
+
+    /// `with_connections(url, 0)` returns an empty vec.
+    #[test]
+    fn with_connections_zero_returns_empty() {
+        let peers = WebSeedPeer::with_connections("https://example.com/f.zip".into(), 0);
+        assert!(peers.is_empty());
+    }
+
+    /// `with_connections(url, 1)` is equivalent to `vec![new(url)]`.
+    #[test]
+    fn with_connections_one_equivalent_to_new() {
+        let peers = WebSeedPeer::with_connections("https://example.com/f.zip".into(), 1);
+        assert_eq!(peers.len(), 1);
+        assert_eq!(
+            peers.first().map(|p| p.url()),
+            Some("https://example.com/f.zip")
+        );
     }
 }

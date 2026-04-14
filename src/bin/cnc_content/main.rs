@@ -33,8 +33,11 @@ const AFTER_HELP: &str = "\
 SUPPORTED GAMES:
   ra         Command & Conquer: Red Alert       Freeware (EA, 2008) — downloadable
   td         Command & Conquer: Tiberian Dawn   Freeware (EA, 2007) — downloadable
+  ts         Command & Conquer: Tiberian Sun    Freeware (EA, 2010) — downloadable
   dune2      Dune II: Building of a Dynasty     NOT freeware — local source only
   dune2000   Dune 2000                          NOT freeware — local source only
+  ra2        Command & Conquer: Red Alert 2     NOT freeware — local source only
+  generals   Command & Conquer: Generals        NOT freeware — local source only
 
 COMMON WORKFLOWS:
   Download Red Alert (default game):
@@ -59,9 +62,16 @@ ENVIRONMENT:
   CNC_CONTENT_ROOT  Override the content directory (same as --content-dir)
 
 NOTE ON FREEWARE:
-  Only Red Alert and Tiberian Dawn are EA-declared freeware and can be
-  downloaded. Dune 2 and Dune 2000 require a local copy (disc, GOG, etc.)
-  and can only be installed via the 'install' command.";
+  Red Alert, Tiberian Dawn, and Tiberian Sun are EA-declared freeware
+  and can be downloaded. Dune 2, Dune 2000, Red Alert 2, and Generals
+  require a local copy (disc, GOG, Steam, etc.) and can only be
+  installed via the 'install' command.
+
+NOT AFFILIATED WITH ELECTRONIC ARTS:
+  This project is not affiliated with, endorsed by, or sponsored by
+  Electronic Arts Inc. Command & Conquer, Red Alert, Tiberian Dawn,
+  Tiberian Sun, and related names are trademarks of Electronic Arts.
+  Used under nominative fair use for interoperability purposes.";
 
 const DOWNLOAD_AFTER_HELP: &str = "\
 PACKAGE NAMES (--package <NAME>):
@@ -71,6 +81,9 @@ PACKAGE NAMES (--package <NAME>):
 
   Tiberian Dawn (td):
     base, music, movies-gdi, movies-nod, covertops, gdi-iso, nod-iso
+
+  Tiberian Sun (ts):
+    base, expand, music, gdi-iso, nod-iso, firestorm-iso
 
 SEEDING POLICIES (--seed <POLICY>):
   pause    Seed content, pause during online play (default)
@@ -146,7 +159,7 @@ enum Command {
     ///
     /// Downloads required packages by default. Use --all for optional
     /// content (music, FMV cutscenes). Only works for freeware games
-    /// (ra, td); non-freeware games require the 'install' command.
+    /// (ra, td, ts); non-freeware games require the 'install' command.
     #[command(after_long_help = DOWNLOAD_AFTER_HELP)]
     Download {
         /// Download a specific package by name (see PACKAGE NAMES below).

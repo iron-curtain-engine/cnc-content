@@ -225,7 +225,9 @@ impl StreamingReader {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let buffered = map.contiguous_from(self.position);
-        let remaining = self.file_size - self.position;
+        // saturating_sub: defense-in-depth against position > file_size (the Seek
+        // impl clamps, but read_from_disk increments position without a clamp).
+        let remaining = self.file_size.saturating_sub(self.position);
         // Ready if: enough buffer OR the rest of the file is available.
         buffered >= self.policy.min_prebuffer || buffered >= remaining
     }
@@ -249,7 +251,8 @@ impl StreamingReader {
                     return false; // stop waiting
                 }
                 let buffered = map.contiguous_from(self.position);
-                let remaining = self.file_size - self.position;
+                // saturating_sub: defense-in-depth (see is_playback_ready).
+                let remaining = self.file_size.saturating_sub(self.position);
                 buffered < self.policy.min_prebuffer && buffered < remaining
             })
             .map_err(|_| io::Error::other("stream lock poisoned"))?;

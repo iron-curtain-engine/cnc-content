@@ -158,7 +158,7 @@ impl ContentSession {
     pub fn ensure_packages(
         &mut self,
         packages: &[PackageId],
-        mut on_progress: impl FnMut(crate::downloader::DownloadProgress),
+        mut on_progress: impl FnMut(crate::downloader::DownloadProgress) + Send,
     ) -> Result<(), SessionError> {
         if !self.game.is_freeware() {
             return Err(SessionError::NotFreeware {
@@ -202,7 +202,7 @@ impl ContentSession {
     /// Downloads and installs all required content that is currently missing.
     pub fn ensure_required(
         &mut self,
-        on_progress: impl FnMut(crate::downloader::DownloadProgress),
+        on_progress: impl FnMut(crate::downloader::DownloadProgress) + Send,
     ) -> Result<(), SessionError> {
         let missing: Vec<PackageId> = self
             .missing_required_packages()
@@ -215,7 +215,7 @@ impl ContentSession {
     /// Downloads and installs ALL content (required + optional) that is missing.
     pub fn ensure_all(
         &mut self,
-        on_progress: impl FnMut(crate::downloader::DownloadProgress),
+        on_progress: impl FnMut(crate::downloader::DownloadProgress) + Send,
     ) -> Result<(), SessionError> {
         let missing: Vec<PackageId> = self.missing_packages().iter().map(|p| p.id).collect();
         self.ensure_packages(&missing, on_progress)

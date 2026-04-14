@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[package]
+name = "workshop-package"
+version = "0.1.0-alpha.0"
+edition = "2021"
+rust-version = "1.89"
+description = "Workshop package format — ZIP archives with content-addressed integrity"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/iron-curtain-engine/workshop-core"
+authors = ["Iron Curtain contributors"]
+keywords = ["workshop", "package", "icpkg", "modding", "gamedev"]
+categories = ["games"]
+
+[dependencies]
+workshop-core = { path = "../workshop-core" }
+sha2 = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2.0"
+zip = { version = "8.5.0", default-features = false, features = ["deflate"] }

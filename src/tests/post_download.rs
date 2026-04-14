@@ -18,25 +18,25 @@ use super::super::*;
 #[test]
 fn archive_org_info_hashes_are_valid_hex() {
     for dl in downloads::all_downloads() {
-        if !dl.info_hash.is_empty() {
+        if let Some(info_hash) = &dl.info_hash {
             assert_eq!(
-                dl.info_hash.len(),
+                info_hash.len(),
                 40,
                 "{:?} info_hash should be 40 hex chars, got {}",
                 dl.id,
-                dl.info_hash.len(),
+                info_hash.len(),
             );
             assert!(
-                dl.info_hash.chars().all(|c| c.is_ascii_hexdigit()),
+                info_hash.chars().all(|c| c.is_ascii_hexdigit()),
                 "{:?} info_hash should be hex only: {}",
                 dl.id,
-                dl.info_hash,
+                info_hash,
             );
             assert!(
-                dl.info_hash.chars().all(|c| !c.is_ascii_uppercase()),
+                info_hash.chars().all(|c| !c.is_ascii_uppercase()),
                 "{:?} info_hash should be lowercase: {}",
                 dl.id,
-                dl.info_hash,
+                info_hash,
             );
         }
     }
@@ -51,7 +51,7 @@ fn archive_org_info_hashes_are_valid_hex() {
 fn archive_org_torrents_have_trackers() {
     // Packages with Archive.org info_hash should have Archive.org trackers.
     for dl in downloads::all_downloads() {
-        if !dl.info_hash.is_empty() && !dl.trackers.is_empty() {
+        if dl.info_hash.is_some() && !dl.trackers.is_empty() {
             assert!(
                 dl.trackers.iter().any(|t| t.contains("archive.org")),
                 "{:?} has trackers but none are Archive.org: {:?}",
@@ -98,16 +98,16 @@ fn manifest_generation_for_installed_content() {
         "manifest should contain file entries"
     );
 
-    // Each file entry should have a valid SHA-256 (64 hex chars).
+    // Each file entry should have a valid BLAKE3 hash (64 hex chars).
     for (path, digest) in &manifest.files {
         assert_eq!(
-            digest.sha256.len(),
+            digest.blake3.len(),
             64,
-            "SHA-256 for {path} should be 64 chars"
+            "BLAKE3 for {path} should be 64 chars"
         );
         assert!(
-            digest.sha256.chars().all(|c| c.is_ascii_hexdigit()),
-            "SHA-256 for {path} should be hex"
+            digest.blake3.chars().all(|c| c.is_ascii_hexdigit()),
+            "BLAKE3 for {path} should be hex"
         );
     }
 

@@ -7,6 +7,7 @@
 //! and mounted disc volumes to find existing RA1 content that can be installed
 //! from without downloading.
 
+mod cncnet;
 mod disc;
 mod gog;
 mod openra;
@@ -45,6 +46,7 @@ pub fn detect_all() -> Vec<DetectedSource> {
         gog::probe,
         registry::probe,
         openra::probe,
+        cncnet::probe,
         disc::probe,
     ] {
         for detected in probe_fn() {

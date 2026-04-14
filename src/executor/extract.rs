@@ -413,6 +413,132 @@ pub(super) fn extract_from_bag_idx(
     Ok((files_written, total_bytes))
 }
 
+/// Extracts files directly from an ISO 9660 disc image.
+///
+/// Opens the ISO, locates each named file within its filesystem using
+/// case-insensitive lookup, and writes the data to the content root.
+/// Used for extracting loose files (e.g. VQA movies, standalone MIX
+/// archives) from disc images without mounting.
+pub(super) fn extract_from_iso(
+    iso_path: &StrictPath,
+    content: &PathBoundary<()>,
+    entries: &[FileMapping],
+    archive_name: &str,
+    on_progress: &mut impl FnMut(InstallProgress),
+) -> Result<(usize, u64), ExecutorError> {
+    if !iso_path.exists() {
+        return Err(ExecutorError::IsoNotFound {
+            path: iso_path.clone().unstrict(),
+        });
+    }
+
+    let file = iso_path.open_file()?;
+    let reader = io::BufReader::new(file);
+    let mut archive = cnc_formats::iso9660::Iso9660ArchiveReader::open(reader)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+    let mut files_written = 0;
+    let mut total_bytes: u64 = 0;
+
+    for mapping in entries {
+        let data = archive
+            .read(mapping.from)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+        let data = data.ok_or_else(|| ExecutorError::IsoEntryNotFound {
+            archive: archive_name.to_string(),
+            entry: mapping.from.to_string(),
+        })?;
+
+        let dst = bounded_path(content, mapping.to)?;
+        dst.create_parent_dir_all()?;
+        dst.write(&data)?;
+
+        let bytes = data.len() as u64;
+        on_progress(InstallProgress::FileWritten {
+            path: dst.unstrict(),
+            bytes,
+        });
+        files_written += 1;
+        total_bytes += bytes;
+    }
+
+    Ok((files_written, total_bytes))
+}
+
+/// Extracts entries from a MIX archive nested inside an ISO 9660 disc image.
+///
+/// Opens the ISO, locates the MIX file inside it as a bounded entry reader
+/// (zero extraction to disk), then opens the MIX through the chained reader
+/// and extracts the requested entries. This enables two-level extraction
+/// from disc images — e.g. Red Alert's `INSTALL/REDALERT.MIX` on the
+/// Allied/Soviet disc ISOs.
+pub(super) fn extract_mix_from_iso(
+    iso_path: &StrictPath,
+    content: &PathBoundary<()>,
+    iso_mix_path: &str,
+    entries: &[FileMapping],
+    archive_name: &str,
+    on_progress: &mut impl FnMut(InstallProgress),
+) -> Result<(usize, u64), ExecutorError> {
+    if !iso_path.exists() {
+        return Err(ExecutorError::IsoNotFound {
+            path: iso_path.clone().unstrict(),
+        });
+    }
+
+    let file = iso_path.open_file()?;
+    let reader = io::BufReader::new(file);
+    let mut iso = cnc_formats::iso9660::Iso9660ArchiveReader::open(reader)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+    // Open the MIX file entry within the ISO as a bounded reader.
+    // This avoids extracting the MIX to disk — the MIX reader operates
+    // directly on the ISO's byte range for that entry.
+    let entry_reader = iso
+        .open_entry(iso_mix_path)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?
+        .ok_or_else(|| ExecutorError::IsoEntryNotFound {
+            archive: archive_name.to_string(),
+            entry: iso_mix_path.to_string(),
+        })?;
+
+    // Chain: ISO entry reader → MIX archive reader.
+    // The entry reader already sits on a buffered ISO reader, so no
+    // additional BufReader layer is needed.
+    let mut mix = cnc_formats::mix::MixArchiveReader::open(entry_reader)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+    let mix_label = format!("{archive_name}:{iso_mix_path}");
+    let mut files_written = 0;
+    let mut total_bytes: u64 = 0;
+
+    for mapping in entries {
+        let data = mix
+            .read(mapping.from)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+        let data = data.ok_or_else(|| ExecutorError::MixEntryNotFound {
+            archive: mix_label.clone(),
+            entry: mapping.from.to_string(),
+        })?;
+
+        let dst = bounded_path(content, mapping.to)?;
+        dst.create_parent_dir_all()?;
+        dst.write(&data)?;
+
+        let bytes = data.len() as u64;
+        on_progress(InstallProgress::FileWritten {
+            path: dst.unstrict(),
+            bytes,
+        });
+        files_written += 1;
+        total_bytes += bytes;
+    }
+
+    Ok((files_written, total_bytes))
+}
+
 /// Returns a human-readable description of an install action.
 pub(super) fn describe_action(action: &InstallAction) -> String {
     match action {
@@ -486,6 +612,28 @@ pub(super) fn describe_action(action: &InstallAction) -> String {
                 "Extracting {} entry/entries from BAG/IDX {}",
                 entries.len(),
                 source_idx
+            )
+        }
+        InstallAction::ExtractIso {
+            source_iso,
+            entries,
+        } => {
+            format!(
+                "Extracting {} entry/entries from ISO {}",
+                entries.len(),
+                source_iso
+            )
+        }
+        InstallAction::ExtractMixFromIso {
+            source_iso,
+            iso_mix_path,
+            entries,
+        } => {
+            format!(
+                "Extracting {} entry/entries from MIX {} in ISO {}",
+                entries.len(),
+                iso_mix_path,
+                source_iso
             )
         }
     }

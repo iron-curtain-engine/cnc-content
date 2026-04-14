@@ -125,4 +125,31 @@ pub enum InstallAction {
         /// Entries to extract (IDX entry name → content-relative path).
         entries: &'static [FileMapping],
     },
+
+    /// Extract files directly from an ISO 9660 disc image in the source directory.
+    ///
+    /// Opens the ISO, locates each named file within its filesystem, and writes
+    /// the file data to the content root. Used for extracting loose files from
+    /// disc images without mounting.
+    ExtractIso {
+        /// Path to the ISO file, relative to the source root.
+        source_iso: &'static str,
+        /// Entries to extract (ISO entry name → content-relative path).
+        entries: &'static [FileMapping],
+    },
+
+    /// Extract entries from a MIX archive nested inside an ISO 9660 disc image.
+    ///
+    /// Opens the ISO, locates the MIX file within it as a bounded reader, then
+    /// extracts entries from the MIX — all without extracting the MIX to disk.
+    /// This enables two-level extraction from disc images (e.g. Red Alert's
+    /// `INSTALL/REDALERT.MIX` on the Allied/Soviet disc ISOs).
+    ExtractMixFromIso {
+        /// Path to the ISO file, relative to the source root.
+        source_iso: &'static str,
+        /// Path to the MIX file inside the ISO (e.g. `"INSTALL/REDALERT.MIX"`).
+        iso_mix_path: &'static str,
+        /// Entries to extract from the MIX (MIX entry name → content-relative path).
+        entries: &'static [FileMapping],
+    },
 }

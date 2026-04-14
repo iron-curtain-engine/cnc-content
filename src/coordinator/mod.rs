@@ -34,6 +34,7 @@
 pub use p2p_distribute::bandwidth::BandwidthEstimator;
 pub use p2p_distribute::bitfield::{rarity_scores, PeerBitfield};
 pub use p2p_distribute::budget::{BudgetExceeded, ConnectionBudget};
+pub use p2p_distribute::choking::{AlwaysUnchoke, ChokingStrategy, TitForTatChoking};
 pub use p2p_distribute::coordinator::{
     CoordinatorConfig, CoordinatorError, CoordinatorProgress, PieceCoordinator,
 };

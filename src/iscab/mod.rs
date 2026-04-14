@@ -34,6 +34,13 @@ const FD_SIZE_V5: usize = 0x33;
 /// File descriptor size for version 6+ archives.
 const FD_SIZE_V6: usize = 0x39;
 
+/// Maximum decompressed file size from an ISCAB entry (512 MB).
+///
+/// The largest individual files in C&C game installers are around 200 MB.
+/// 512 MB provides generous headroom while preventing OOM from a crafted
+/// archive that declares a multi-GB expanded size in its header.
+const MAX_ISCAB_ENTRY_SIZE: u64 = 512 * 1024 * 1024;
+
 /// Errors from InstallShield CAB operations.
 #[derive(Debug, Error)]
 pub enum IscabError {
@@ -118,7 +125,15 @@ impl IscabArchive {
         let fd_size = if major < 6 { FD_SIZE_V5 } else { FD_SIZE_V6 };
 
         // ── Parse cab descriptor ─────────────────────────────────────
-        if cab_desc_offset + 0x24 > data.len() {
+        // Use checked_add to prevent usize wrapping on 32-bit platforms:
+        // a crafted cab_desc_offset near usize::MAX would wrap around
+        // with raw `+`, bypassing the bounds check entirely.
+        let cab_desc_end = cab_desc_offset
+            .checked_add(0x24)
+            .ok_or(IscabError::Corrupt {
+                detail: "cab descriptor offset overflow".into(),
+            })?;
+        if cab_desc_end > data.len() {
             return Err(IscabError::Corrupt {
                 detail: "cab descriptor offset out of bounds".into(),
             });
@@ -139,10 +154,15 @@ impl IscabArchive {
             // Overflow-safe: i and 4 are both controlled, but cab-supplied
             // directory_count could be large, so saturate instead of wrapping.
             let ptr_offset = file_table_offset.saturating_add(i.saturating_mul(4));
-            if ptr_offset + 4 > data.len() {
+            // Checked add prevents wrapping past usize::MAX in the bounds test.
+            let Some(ptr_end) = ptr_offset.checked_add(4) else {
+                break;
+            };
+            if ptr_end > data.len() {
                 break;
             }
-            let name_offset = file_table_offset + read_u32(&data, ptr_offset)? as usize;
+            let name_offset =
+                file_table_offset.saturating_add(read_u32(&data, ptr_offset)? as usize);
             let name = read_cstring(&data, name_offset);
             directories.push(name);
         }
@@ -152,11 +172,15 @@ impl IscabArchive {
         for i in 0..file_count {
             // Overflow-safe: both i and fd_size come from untrusted data.
             let base = file_table_offset2.saturating_add(i.saturating_mul(fd_size));
-            if base + fd_size > data.len() {
+            // Checked add prevents wrapping past usize::MAX in the bounds test.
+            let Some(base_end) = base.checked_add(fd_size) else {
+                break;
+            };
+            if base_end > data.len() {
                 break;
             }
 
-            let name_offset = file_table_offset + read_u32(&data, base)? as usize;
+            let name_offset = file_table_offset.saturating_add(read_u32(&data, base)? as usize);
             let dir_index = read_u32(&data, base + 0x04)? as usize;
             let flags = read_u16(&data, base + 0x08)?;
 
@@ -176,7 +200,10 @@ impl IscabArchive {
                 )
             };
 
-            let volume = if volume_offset + 2 <= data.len() {
+            let volume = if volume_offset
+                .checked_add(2)
+                .is_some_and(|end| end <= data.len())
+            {
                 read_u16(&data, volume_offset)? as u32
             } else {
                 1
@@ -243,6 +270,26 @@ impl IscabArchive {
         let mut file = std::fs::File::open(vol_path)?;
         file.seek(SeekFrom::Start(entry.data_offset))?;
 
+        // Reject entries with declared sizes that would cause OOM.
+        // Both expanded_size and compressed_size come from the untrusted
+        // archive header — a crafted header could claim terabytes.
+        if entry.expanded_size > MAX_ISCAB_ENTRY_SIZE {
+            return Err(IscabError::Corrupt {
+                detail: format!(
+                    "entry expanded_size {} exceeds limit {MAX_ISCAB_ENTRY_SIZE}",
+                    entry.expanded_size
+                ),
+            });
+        }
+        if entry.compressed_size > MAX_ISCAB_ENTRY_SIZE {
+            return Err(IscabError::Corrupt {
+                detail: format!(
+                    "entry compressed_size {} exceeds limit {MAX_ISCAB_ENTRY_SIZE}",
+                    entry.compressed_size
+                ),
+            });
+        }
+
         let read_size = if entry.flags & FLAG_COMPRESSED != 0 {
             entry.compressed_size
         } else {
@@ -260,17 +307,38 @@ impl IscabArchive {
     }
 }
 
-/// Decompresses zlib-compressed data to the expected uncompressed size.
+/// Decompresses zlib-compressed data, capping output at the declared size.
+///
+/// Uses `take()` to prevent a crafted zlib stream from inflating beyond
+/// the header's `expanded_size` — defends against decompression bombs
+/// (CWE-409) where a small compressed payload decompresses to vastly
+/// more than the header claims.
 fn decompress_zlib(data: &[u8], expected_size: usize) -> Result<Vec<u8>, IscabError> {
     use flate2::read::ZlibDecoder;
 
-    let mut decoder = ZlibDecoder::new(data);
+    let decoder = ZlibDecoder::new(data);
+    // Cap decompressed output at expected_size + 1 so we can detect if
+    // the stream produces more data than declared. The +1 is for the
+    // over-read detection below.
+    let cap = (expected_size as u64).saturating_add(1);
+    let mut limited = decoder.take(cap);
     let mut out = Vec::with_capacity(expected_size);
-    decoder
+    limited
         .read_to_end(&mut out)
         .map_err(|e| IscabError::Decompress {
             detail: e.to_string(),
         })?;
+    // If the decompressed output exceeds expected_size, the archive is
+    // corrupt or adversarial (expanded_size header lied). Reject to
+    // prevent downstream code from processing unexpected data sizes.
+    if out.len() > expected_size {
+        return Err(IscabError::Corrupt {
+            detail: format!(
+                "decompressed size {} exceeds declared expanded_size {expected_size}",
+                out.len()
+            ),
+        });
+    }
     Ok(out)
 }
 
@@ -307,11 +375,26 @@ fn read_u64(data: &[u8], offset: usize) -> Result<u64, IscabError> {
     Ok(u64::from_le_bytes(bytes))
 }
 
+/// Maximum length for NUL-terminated strings in the archive header (4 KiB).
+///
+/// InstallShield directory names and filenames are short paths — a few hundred
+/// bytes at most. 4 KiB provides generous headroom while preventing a crafted
+/// header with a corrupted name offset (pointing into non-NUL data) from
+/// allocating a multi-megabyte String that contains the rest of the header.
+const MAX_CSTRING_LEN: usize = 4096;
+
 /// Reads a NUL-terminated C string starting at the given offset.
+///
+/// Caps the scan at [`MAX_CSTRING_LEN`] bytes to prevent excessive allocation
+/// from corrupted headers that lack a NUL terminator in the expected region.
 fn read_cstring(data: &[u8], offset: usize) -> String {
     let tail = data.get(offset..).unwrap_or(&[]);
-    let len = tail.iter().position(|&b| b == 0).unwrap_or(tail.len());
-    String::from_utf8_lossy(tail.get(..len).unwrap_or(&[])).into_owned()
+    // Limit scan length to prevent reading the entire header as one string
+    // when the name offset is corrupted and points into non-NUL data.
+    let scan_limit = std::cmp::min(tail.len(), MAX_CSTRING_LEN);
+    let scan = tail.get(..scan_limit).unwrap_or(&[]);
+    let len = scan.iter().position(|&b| b == 0).unwrap_or(scan.len());
+    String::from_utf8_lossy(scan.get(..len).unwrap_or(&[])).into_owned()
 }
 
 #[cfg(test)]

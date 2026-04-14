@@ -322,9 +322,9 @@ pub static ALL_SOURCES: &[ContentSource] = &[
         platform_hint: Some(PlatformHint::GogGameId(1207659107)),
     },
     // ══════════════════════════════════════════════════════════════════════
-    // Tiberian Sun sources — local only
+    // Tiberian Sun sources — freeware since 2010
     //
-    // TS was briefly free-to-download from EA but later removed.
+    // EA released TS + Firestorm as freeware in 2010 promoting C&C4.
     // Placeholder SHA-1 hashes are used until verified from real media.
     // ══════════════════════════════════════════════════════════════════════
 

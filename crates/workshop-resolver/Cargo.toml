@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[package]
+name = "workshop-resolver"
+version = "0.1.0-alpha.0"
+edition = "2021"
+rust-version = "1.89"
+description = "Dependency resolution and lock file management for Workshop packages"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/iron-curtain-engine/workshop-core"
+authors = ["Iron Curtain contributors"]
+keywords = ["workshop", "resolver", "dependency", "semver", "lock-file"]
+categories = ["games"]
+
+[dependencies]
+workshop-core = { path = "../workshop-core" }
+workshop-registry = { path = "../workshop-registry" }
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2.0"
+toml = "1.1.2"

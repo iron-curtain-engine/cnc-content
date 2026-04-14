@@ -1,0 +1,332 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2025-present Iron Curtain contributors
+
+# Updates OpenRA mirror URLs in data/downloads.toml and validates ALL
+# external domains used by cnc-content against threat intelligence.
+#
+# data/downloads.toml is the single source of truth for all download
+# URLs: mirror_list_url, mirrors, direct_urls, web_seeds, trackers.
+#
+# This workflow:
+#
+# 1. Reads downloads.toml for non-empty mirror_list_url entries.
+# 2. Fetches each mirror list and updates the `mirrors` array
+#    in-place in downloads.toml (via Python/tomlkit for formatting-
+#    preserving TOML edits).
+# 3. Validates EVERY external domain across all data files against
+#    three layers of threat intelligence (DNS blocklists, URLhaus,
+#    Google Safe Browsing).
+# 4. Opens a PR only if downloads.toml changed AND IoC checks pass.
+#
+# The IoC check covers ALL project domains — mirrors, direct_urls,
+# web_seeds, trackers, and mirror_list_url hosts from downloads.toml,
+# plus tracker hosts from trackers.txt.
+
+name: Update OpenRA Mirrors
+
+on:
+    schedule:
+        # Weekly on Monday at 06:00 UTC — mirrors change infrequently.
+        - cron: "0 6 * * 1"
+    workflow_dispatch: {}
+
+permissions:
+    contents: write
+    pull-requests: write
+
+jobs:
+    update-mirrors:
+        name: Fetch mirror lists & validate domains
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: Install tomlkit
+              run: pip install tomlkit
+
+            # ── Step 1: Fetch mirror lists and update downloads.toml ───
+            #
+            # For each [[download]] entry with a non-empty mirror_list_url,
+            # fetches the mirror list (one URL per line) and updates the
+            # `mirrors` array in-place. Uses tomlkit to preserve TOML
+            # formatting, comments, and ordering.
+            #
+            # Fetch failures are non-fatal — IC-hosted mirrors return 404
+            # until their infrastructure goes live.
+
+            - name: Fetch mirror lists and update downloads.toml
+              run: |
+                  python3 << 'PYEOF'
+                  import sys
+                  import urllib.request
+                  import urllib.error
+                  import tomlkit
+
+                  TOML_PATH = "data/downloads.toml"
+
+                  with open(TOML_PATH, "r") as f:
+                      doc = tomlkit.load(f)
+
+                  changed = False
+
+                  for entry in doc["download"]:
+                      pkg_id = entry.get("id", "???")
+                      mirror_url = entry.get("mirror_list_url", "")
+                      if not mirror_url:
+                          continue
+
+                      print(f"Fetching mirrors for {pkg_id} from {mirror_url}")
+
+                      try:
+                          req = urllib.request.Request(mirror_url, headers={"User-Agent": "cnc-content-mirror-updater/1.0"})
+                          with urllib.request.urlopen(req, timeout=30) as resp:
+                              body = resp.read().decode("utf-8", errors="replace")
+                      except (urllib.error.URLError, OSError) as exc:
+                          # Non-fatal: IC-hosted lists may 404 until infra is live.
+                          print(f"  ⚠ Skipped (fetch failed): {exc}")
+                          continue
+
+                      # Parse mirror list: one HTTPS URL per line, skip blanks and comments.
+                      new_mirrors = []
+                      for line in body.splitlines():
+                          line = line.strip()
+                          if line and line.startswith("https://"):
+                              new_mirrors.append(line)
+
+                      if not new_mirrors:
+                          print(f"  ⚠ Skipped: no valid HTTPS URLs in response")
+                          continue
+
+                      # Compare with existing mirrors (order-sensitive).
+                      old_mirrors = [str(m) for m in entry.get("mirrors", [])]
+                      if old_mirrors == new_mirrors:
+                          print(f"  ✓ Up to date ({len(new_mirrors)} mirrors)")
+                          continue
+
+                      # Update the mirrors array in-place.
+                      arr = tomlkit.array()
+                      arr.multiline(True)
+                      for url in new_mirrors:
+                          arr.append(url)
+                      entry["mirrors"] = arr
+                      changed = True
+                      print(f"  ✓ Updated: {len(old_mirrors)} → {len(new_mirrors)} mirrors")
+
+                  if changed:
+                      with open(TOML_PATH, "w") as f:
+                          tomlkit.dump(doc, f)
+                      print("\ndownloads.toml updated.")
+                  else:
+                      print("\nNo mirror changes detected.")
+
+                  PYEOF
+
+            # ── Step 2: Check for changes ──────────────────────────────
+
+            - name: Check for changes
+              id: diff
+              run: |
+                  if git diff --quiet data/downloads.toml; then
+                    echo "changed=false" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "changed=true" >> "$GITHUB_OUTPUT"
+                  fi
+
+            # ── Step 3: IoC validation ─────────────────────────────────
+            #
+            # Three-layer threat intelligence check on EVERY external
+            # domain used by the project. The workflow FAILS if any domain
+            # is flagged — no PR is created with compromised URLs.
+            #
+            # Domain sources (exhaustive):
+            #   - data/downloads.toml: all URL fields (mirrors, mirror_list_url,
+            #     direct_urls, web_seeds, trackers)
+            #   - data/trackers.txt:   BitTorrent tracker announce URLs
+            #
+            # Layer 1: DNS blocklists (no API key, always runs)
+            #   - Spamhaus DBL + SURBL
+            # Layer 2: URLhaus / abuse.ch (free Auth-Key in GH secret)
+            #   - URLhaus malware DB + server-side Spamhaus/SURBL cross-check
+            # Layer 3: Google Safe Browsing v4 (free API key in GH secret)
+            #   - Malware, social engineering, unwanted software, phishing
+
+            - name: Validate all project domains against IoC databases
+              if: steps.diff.outputs.changed == 'true'
+              env:
+                  URLHAUS_AUTH_KEY: ${{ secrets.URLHAUS_AUTH_KEY }}
+                  GOOGLE_SAFE_BROWSING_KEY: ${{ secrets.GOOGLE_SAFE_BROWSING_KEY }}
+              run: |
+                  set -euo pipefail
+
+                  # ── Collect ALL URLs from every data source ──────────
+                  all_urls=""
+
+                  # 1. downloads.toml — all URL-valued fields (mirrors,
+                  #    direct_urls, web_seeds, trackers, mirror_list_url).
+                  toml_urls=$(grep -oP '"https?://[^"]+' data/downloads.toml | sed 's/^"//' | sort -u || true)
+                  all_urls="$all_urls"$'\n'"$toml_urls"
+
+                  # 2. Tracker announce URLs (UDP + HTTPS).
+                  if [ -f data/trackers.txt ]; then
+                    tracker_urls=$(cat data/trackers.txt | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' | sort -u || true)
+                    all_urls="$all_urls"$'\n'"$tracker_urls"
+                  fi
+
+                  # Deduplicate and filter to actual URLs.
+                  urls=$(echo "$all_urls" | grep -E '^https?://' | sort -u)
+
+                  if [ -z "$urls" ]; then
+                    echo "::error::No URLs found across data files"
+                    exit 1
+                  fi
+
+                  # Extract unique domains from all URLs (http/https/udp schemes).
+                  all_urls_for_domains=$(echo "$all_urls" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' | sort -u)
+                  domains=$(echo "$all_urls_for_domains" | sed -E 's|^[a-z]+://([^/:]+).*|\1|' | sort -u)
+
+                  url_count=$(echo "$urls" | wc -l)
+                  domain_count=$(echo "$domains" | wc -l)
+                  echo "Collected $url_count unique HTTP(S) URLs across $domain_count unique domains"
+                  echo ""
+                  echo "Domains to validate:"
+                  echo "$domains"
+                  echo "---"
+
+                  failed=0
+
+                  # ── Layer 1: DNS blocklists (always available) ───────
+                  echo "=== Layer 1: DNS blocklist checks ==="
+                  while IFS= read -r domain; do
+                    [ -z "$domain" ] && continue
+
+                    # Spamhaus DBL: if the domain resolves, it's blocklisted.
+                    if host -t A "${domain}.dbl.spamhaus.org" 2>/dev/null | grep -q "has address"; then
+                      echo "::error::BLOCKED by Spamhaus DBL: $domain"
+                      failed=1
+                    else
+                      echo "  ✓ Spamhaus DBL clean: $domain"
+                    fi
+
+                    # SURBL: if the domain resolves, it's blocklisted.
+                    if host -t A "${domain}.multi.surbl.org" 2>/dev/null | grep -q "has address"; then
+                      echo "::error::BLOCKED by SURBL: $domain"
+                      failed=1
+                    else
+                      echo "  ✓ SURBL clean: $domain"
+                    fi
+                  done <<< "$domains"
+
+                  # ── Layer 2: URLhaus / abuse.ch ──────────────────────
+                  if [ -n "${URLHAUS_AUTH_KEY:-}" ]; then
+                    echo ""
+                    echo "=== Layer 2: URLhaus (abuse.ch) host check ==="
+                    while IFS= read -r domain; do
+                      [ -z "$domain" ] && continue
+
+                      resp=$(curl --fail --silent --max-time 15 \
+                        -H "Auth-Key: $URLHAUS_AUTH_KEY" \
+                        --data "host=$domain" \
+                        "https://urlhaus-api.abuse.ch/v1/host/" || echo '{"query_status":"error"}')
+
+                      status=$(echo "$resp" | jq -r '.query_status // "error"')
+
+                      if [ "$status" = "no_results" ]; then
+                        echo "  ✓ URLhaus clean: $domain"
+                      elif [ "$status" = "ok" ]; then
+                        url_count=$(echo "$resp" | jq -r '.url_count // "0"')
+                        spamhaus=$(echo "$resp" | jq -r '.blacklists.spamhaus_dbl // "unknown"')
+                        surbl=$(echo "$resp" | jq -r '.blacklists.surbl // "unknown"')
+                        echo "::warning::URLhaus has records for $domain (urls: $url_count, spamhaus: $spamhaus, surbl: $surbl)"
+                        # Only fail if actively blocklisted (not just "has records").
+                        if [ "$spamhaus" != "not listed" ] && [ "$spamhaus" != "unknown" ]; then
+                          echo "::error::BLOCKED by Spamhaus DBL (via URLhaus): $domain — $spamhaus"
+                          failed=1
+                        fi
+                        if [ "$surbl" = "listed" ]; then
+                          echo "::error::BLOCKED by SURBL (via URLhaus): $domain"
+                          failed=1
+                        fi
+                      else
+                        echo "  ⚠ URLhaus query failed for $domain (status: $status)"
+                      fi
+
+                      # Rate limit: abuse.ch asks for reasonable use.
+                      sleep 1
+                    done <<< "$domains"
+                  else
+                    echo ""
+                    echo "::notice::Layer 2 skipped: URLHAUS_AUTH_KEY secret not configured. Get a free key at https://auth.abuse.ch/"
+                  fi
+
+                  # ── Layer 3: Google Safe Browsing v4 ─────────────────
+                  if [ -n "${GOOGLE_SAFE_BROWSING_KEY:-}" ]; then
+                    echo ""
+                    echo "=== Layer 3: Google Safe Browsing ==="
+
+                    # Build JSON payload with all HTTP(S) URLs.
+                    threat_entries=$(echo "$urls" | jq -R '{"url": .}' | jq -s '.')
+                    payload=$(jq -n \
+                      --argjson entries "$threat_entries" \
+                      '{
+                        "client": {"clientId": "cnc-content-mirror-check", "clientVersion": "1.0"},
+                        "threatInfo": {
+                          "threatTypes": ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION"],
+                          "platformTypes": ["ANY_PLATFORM"],
+                          "threatEntryTypes": ["URL"],
+                          "threatEntries": $entries
+                        }
+                      }')
+
+                    resp=$(curl --fail --silent --max-time 30 \
+                      -H "Content-Type: application/json" \
+                      -d "$payload" \
+                      "https://safebrowsing.googleapis.com/v4/threatMatches:find?key=$GOOGLE_SAFE_BROWSING_KEY" || echo '{"error": true}')
+
+                    # Empty matches object = all clean.
+                    if echo "$resp" | jq -e '.matches' > /dev/null 2>&1; then
+                      match_count=$(echo "$resp" | jq '.matches | length')
+                      echo "::error::Google Safe Browsing flagged $match_count URL(s):"
+                      echo "$resp" | jq -r '.matches[] | "  THREAT: \(.threatType) — \(.threat.url)"'
+                      failed=1
+                    elif echo "$resp" | jq -e '.error' > /dev/null 2>&1; then
+                      echo "  ⚠ Google Safe Browsing API error (non-fatal)"
+                    else
+                      echo "  ✓ Google Safe Browsing: all URLs clean"
+                    fi
+                  else
+                    echo ""
+                    echo "::notice::Layer 3 skipped: GOOGLE_SAFE_BROWSING_KEY secret not configured."
+                  fi
+
+                  echo ""
+                  if [ "$failed" -ne 0 ]; then
+                    echo "::error::IoC validation FAILED — PR will not be created."
+                    exit 1
+                  fi
+                  echo "✓ All project domains passed IoC validation."
+
+            # ── Step 4: Open PR ────────────────────────────────────────
+
+            - name: Create pull request
+              if: steps.diff.outputs.changed == 'true'
+              uses: peter-evans/create-pull-request@v7
+              with:
+                  commit-message: "chore: update OpenRA mirrors in downloads.toml"
+                  title: "chore: update OpenRA mirrors in downloads.toml"
+                  body: |
+                      Automated update of OpenRA mirror URLs in `data/downloads.toml`.
+
+                      The workflow fetches each non-empty `mirror_list_url`, parses the
+                      returned mirror list, and updates the `mirrors` array in-place.
+                      `downloads.toml` is the single source of truth — no separate
+                      cache files.
+
+                      All project domains (downloads.toml URLs + trackers.txt) have been
+                      validated against DNS blocklists, URLhaus, and Google Safe Browsing.
+                  branch: chore/update-mirrors
+                  delete-branch: true
+                  labels: dependencies

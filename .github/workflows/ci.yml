@@ -97,3 +97,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
+
+  mirrors:
+    name: Mirror Reachability
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: mirrors
+      - name: Test compiled mirrors are reachable
+        env:
+          CNC_TEST_MIRRORS: "1"
+        run: cargo test compiled_mirrors_are_reachable -- --nocapture

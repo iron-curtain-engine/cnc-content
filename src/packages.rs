@@ -258,6 +258,8 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
             SourceId::TheFirstDecade,
             SourceId::SteamTuc,
             SourceId::OriginTuc,
+            SourceId::SteamRemastered,
+            SourceId::OriginRemastered,
         ],
         download: Some(DownloadId::RaMoviesSoviet),
     },
@@ -449,10 +451,11 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
         download: None, // NOT freeware — no download
     },
     // ══════════════════════════════════════════════════════════════════════
-    // Tiberian Sun — LOCAL SOURCE ONLY (NOT freeware, no downloads)
+    // Tiberian Sun — freeware since 2010 (EA release promoting C&C4)
     //
-    // Tiberian Sun was briefly available for free download from EA but was
-    // later removed. We treat it as local-source-only for legal safety.
+    // EA released Tiberian Sun + Firestorm as freeware in 2010.
+    // cnc-comm.com hosts disc ISOs as ZIP archives. IC content-bootstrap
+    // will host extracted music and movies as separate downloads.
     // ══════════════════════════════════════════════════════════════════════
 
     // ── Required packages ─────────────────────────────────────────────
@@ -474,7 +477,7 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
             SourceId::TsSteamTuc,
             SourceId::TsOriginTuc,
         ],
-        download: None, // NOT freeware — no download
+        download: Some(DownloadId::TsBaseFiles),
     },
     ContentPackage {
         id: PackageId::TsFirestorm,
@@ -487,7 +490,7 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
             SourceId::TsSteamTuc,
             SourceId::TsOriginTuc,
         ],
-        download: None,
+        download: Some(DownloadId::TsExpand),
     },
     // ── Optional packages ─────────────────────────────────────────────
     ContentPackage {
@@ -501,7 +504,7 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
             SourceId::TsSteamTuc,
             SourceId::TsOriginTuc,
         ],
-        download: None,
+        download: Some(DownloadId::TsMusic),
     },
     ContentPackage {
         id: PackageId::TsMovies,
@@ -514,7 +517,7 @@ pub static ALL_PACKAGES: &[ContentPackage] = &[
             SourceId::TsSteamTuc,
             SourceId::TsOriginTuc,
         ],
-        download: None,
+        download: Some(DownloadId::TsMovies),
     },
     // ══════════════════════════════════════════════════════════════════════
     // Red Alert 2 — LOCAL SOURCE ONLY (NOT freeware, no downloads)

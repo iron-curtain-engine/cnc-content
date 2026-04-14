@@ -153,6 +153,125 @@ pub fn select_multiple_pieces(
     candidates
 }
 
+// ── Speed-category piece affinity ───────────────────────────────────
+
+/// Speed categories for peer bucketing.
+///
+/// ## Design (from libtorrent's speed-affinity piece picker)
+///
+/// libtorrent assigns each peer to a speed category and makes same-speed
+/// peers prefer the same pieces. The benefit: when a fast peer preempts a
+/// slow peer on a piece, the slow peer's partial download is wasted. If
+/// slow peers pick different pieces from fast peers, preemption waste is
+/// minimised.
+///
+/// Categories are defined by percentiles of the reference speed (fastest
+/// peer in the session).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SpeedCategory {
+    /// Below 25% of reference speed.
+    Slow,
+    /// 25%–75% of reference speed.
+    Medium,
+    /// Above 75% of reference speed.
+    Fast,
+}
+
+impl SpeedCategory {
+    /// Classifies a peer speed relative to the reference (fastest peer).
+    ///
+    /// Returns `Slow` if speed < 25% of reference, `Fast` if > 75%,
+    /// `Medium` otherwise. When reference is 0 (no peers with measured
+    /// speed), returns `Medium` as a neutral default.
+    pub fn classify(speed: u64, reference_speed: u64) -> Self {
+        if reference_speed == 0 {
+            return Self::Medium;
+        }
+        let ratio_pct = speed.saturating_mul(100) / reference_speed;
+        if ratio_pct < 25 {
+            Self::Slow
+        } else if ratio_pct > 75 {
+            Self::Fast
+        } else {
+            Self::Medium
+        }
+    }
+
+    /// Returns a tiebreaker bias for piece selection.
+    ///
+    /// Same-speed peers should cluster on certain pieces. This bias
+    /// adjusts the piece index used for tiebreaking:
+    /// - `Fast` peers prefer lower indices (they'll finish first).
+    /// - `Slow` peers prefer higher indices (different from fast).
+    /// - `Medium` peers are neutral.
+    ///
+    /// The caller adds this bias to piece_index during sort tiebreaking.
+    fn tiebreak_bias(self, piece_index: u32, piece_count: u32) -> u32 {
+        match self {
+            // Fast peers: sort by piece_index ascending (lower first).
+            Self::Fast => piece_index,
+            // Medium peers: start from the middle.
+            Self::Medium => {
+                let half = piece_count / 2;
+                piece_index.wrapping_add(half) % piece_count
+            }
+            // Slow peers: sort by piece_index descending (higher first).
+            Self::Slow => piece_count.saturating_sub(piece_index).saturating_sub(1),
+        }
+    }
+}
+
+/// Selects the best piece for a specific speed category.
+///
+/// Like [`select_next_piece`], but applies speed-category affinity as a
+/// tiebreaker. Pieces with equal rarity+priority scores are ordered by the
+/// peer's speed category, so same-speed peers converge on the same pieces
+/// and different-speed peers avoid contention.
+///
+/// ## Parameters
+///
+/// - `needed`, `bitfields`, `priority_map`, `piece_count`: same as
+///   [`select_next_piece`].
+/// - `category`: the speed category of the peer being assigned a piece.
+pub fn select_piece_with_affinity(
+    needed: &[u32],
+    bitfields: &[&PeerBitfield],
+    priority_map: &PiecePriorityMap,
+    piece_count: u32,
+    category: SpeedCategory,
+) -> Option<PieceSelection> {
+    if needed.is_empty() {
+        return None;
+    }
+
+    let scores = rarity_scores(bitfields, piece_count);
+    let max_rarity = scores.iter().copied().max().unwrap_or(0);
+
+    let mut candidates: Vec<(PieceSelection, u32)> = needed
+        .iter()
+        .filter_map(|&idx| {
+            let rarity = scores.get(idx as usize).copied().unwrap_or(0);
+            if rarity == 0 {
+                return None;
+            }
+            let score = priority_map.weighted_score(idx, rarity, max_rarity);
+            let tiebreak = category.tiebreak_bias(idx, piece_count);
+            Some((
+                PieceSelection {
+                    piece_index: idx,
+                    score,
+                },
+                tiebreak,
+            ))
+        })
+        .collect();
+
+    // Sort by score descending, then by category-specific tiebreak ascending.
+    candidates.sort_by(|a, b| b.0.score.cmp(&a.0.score).then(a.1.cmp(&b.1)));
+
+    candidates.first().map(|(sel, _)| *sel)
+}
+
 // ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -363,5 +482,76 @@ mod tests {
                 "Critical pieces should come before non-critical"
             );
         }
+    }
+
+    // ── Speed-category affinity ─────────────────────────────────────
+
+    /// Speed classification buckets correctly.
+    ///
+    /// Peers below 25% of reference are Slow, above 75% are Fast, middle
+    /// is Medium.
+    #[test]
+    fn speed_category_classification() {
+        assert_eq!(SpeedCategory::classify(10, 100), SpeedCategory::Slow);
+        assert_eq!(SpeedCategory::classify(24, 100), SpeedCategory::Slow);
+        assert_eq!(SpeedCategory::classify(25, 100), SpeedCategory::Medium);
+        assert_eq!(SpeedCategory::classify(50, 100), SpeedCategory::Medium);
+        assert_eq!(SpeedCategory::classify(75, 100), SpeedCategory::Medium);
+        assert_eq!(SpeedCategory::classify(76, 100), SpeedCategory::Fast);
+        assert_eq!(SpeedCategory::classify(100, 100), SpeedCategory::Fast);
+    }
+
+    /// Zero reference speed returns Medium.
+    #[test]
+    fn speed_category_zero_reference() {
+        assert_eq!(SpeedCategory::classify(0, 0), SpeedCategory::Medium);
+        assert_eq!(SpeedCategory::classify(1000, 0), SpeedCategory::Medium);
+    }
+
+    /// Fast and Slow peers prefer different pieces for the same score.
+    ///
+    /// When rarity and priority are identical, Fast peers should prefer
+    /// lower indices and Slow peers should prefer higher indices. This
+    /// reduces wasted partial downloads when a fast peer preempts a slow one.
+    #[test]
+    fn affinity_fast_and_slow_prefer_different_pieces() {
+        let now = Instant::now();
+        let map = PiecePriorityMap::new(8, now);
+        let a = PeerBitfield::new_full(8);
+        let needed: Vec<u32> = (0..8).collect();
+
+        let fast_pick = select_piece_with_affinity(&needed, &[&a], &map, 8, SpeedCategory::Fast);
+        let slow_pick = select_piece_with_affinity(&needed, &[&a], &map, 8, SpeedCategory::Slow);
+
+        // Both should return Some (all pieces available).
+        assert!(fast_pick.is_some());
+        assert!(slow_pick.is_some());
+
+        // With uniform rarity and priority, tiebreak should differ:
+        // Fast prefers lower indices, Slow prefers higher indices.
+        let fast_idx = fast_pick.unwrap().piece_index;
+        let slow_idx = slow_pick.unwrap().piece_index;
+        assert_ne!(
+            fast_idx, slow_idx,
+            "fast and slow should prefer different pieces"
+        );
+    }
+
+    /// Priority still overrides affinity — Critical pieces beat tiebreaking.
+    #[test]
+    fn affinity_does_not_override_priority() {
+        let now = Instant::now();
+        let mut map = PiecePriorityMap::new(4, now);
+        // Piece 3 is Critical.
+        map.update(&[3], &[], &[], now);
+        let a = PeerBitfield::new_full(4);
+        let needed = vec![0, 1, 2, 3];
+
+        let pick = select_piece_with_affinity(&needed, &[&a], &map, 4, SpeedCategory::Slow);
+        assert_eq!(
+            pick.unwrap().piece_index,
+            3,
+            "Critical piece should win regardless of affinity"
+        );
     }
 }

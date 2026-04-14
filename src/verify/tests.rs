@@ -1,6 +1,6 @@
 //! Unit tests for source identification and installed-content verification.
 //!
-//! Covers SHA-1 source ID checks, SHA-256 manifest generation and
+//! Covers SHA-1 source ID checks, BLAKE3 manifest generation and
 //! verification, hex encoding, and adversarial inputs.
 
 use super::*;
@@ -110,46 +110,46 @@ fn sha1_file_missing_returns_error() {
     assert!(result.is_err());
 }
 
-// ── sha256_file ──────────────────────────────────────────────────
+// ── blake3_file ──────────────────────────────────────────────────
 
-/// `sha256_file` of an empty file must produce the well-known SHA-256 of empty input.
+/// `blake3_file` of an empty file must produce the well-known BLAKE3 of empty input.
 ///
-/// The SHA-256 of the empty string is a published 64-character constant; matching
+/// The BLAKE3 of the empty string is a published 64-character constant; matching
 /// it confirms the hasher is initialized correctly and the output length is always
 /// exactly 64 hex characters, as required by the manifest format.
 #[test]
-fn sha256_file_known_hash() {
-    let tmp = std::env::temp_dir().join("cnc-verify-sha256");
+fn blake3_file_known_hash() {
+    let tmp = std::env::temp_dir().join("cnc-verify-blake3");
     let _ = fs::remove_dir_all(&tmp);
     fs::create_dir_all(&tmp).unwrap();
 
-    // SHA-256 of empty string is e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    // BLAKE3 of empty string is af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262
     let path = tmp.join("empty.bin");
     fs::write(&path, b"").unwrap();
-    let hash = sha256_file(&path).unwrap();
+    let hash = blake3_file(&path).unwrap();
     assert_eq!(
         hash,
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"
     );
     assert_eq!(hash.len(), 64);
 
     let _ = fs::remove_dir_all(&tmp);
 }
 
-/// `sha256_file` must return only lowercase hex digits with no uppercase characters.
+/// `blake3_file` must return only lowercase hex digits with no uppercase characters.
 ///
 /// Manifest files store hashes as lowercase strings; an uppercase digit would
 /// cause string equality to fail during verification even when the file is intact,
 /// producing a false corruption report.
 #[test]
-fn sha256_file_is_lowercase_hex() {
-    let tmp = std::env::temp_dir().join("cnc-verify-sha256-case");
+fn blake3_file_is_lowercase_hex() {
+    let tmp = std::env::temp_dir().join("cnc-verify-blake3-case");
     let _ = fs::remove_dir_all(&tmp);
     fs::create_dir_all(&tmp).unwrap();
 
     let path = tmp.join("data.bin");
     fs::write(&path, b"test data for hashing").unwrap();
-    let hash = sha256_file(&path).unwrap();
+    let hash = blake3_file(&path).unwrap();
     assert!(hash
         .chars()
         .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
@@ -279,33 +279,33 @@ fn verify_installed_content_detects_mismatch() {
     fs::write(tmp.join("good.mix"), b"correct data").unwrap();
     fs::write(tmp.join("bad.mix"), b"wrong data").unwrap();
 
-    let good_hash = sha256_file(&tmp.join("good.mix")).unwrap();
+    let good_hash = blake3_file(&tmp.join("good.mix")).unwrap();
 
     let mut files = BTreeMap::new();
     files.insert(
         "good.mix".to_string(),
         FileDigest {
-            sha256: good_hash,
+            blake3: good_hash,
             size: 12,
         },
     );
     files.insert(
         "bad.mix".to_string(),
         FileDigest {
-            sha256: "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+            blake3: "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
             size: 10,
         },
     );
     files.insert(
         "missing.mix".to_string(),
         FileDigest {
-            sha256: "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+            blake3: "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
             size: 0,
         },
     );
 
     let manifest = InstalledContentManifest {
-        version: 1,
+        version: CONTENT_MANIFEST_VERSION,
         game: "ra".to_string(),
         content_version: "v1".to_string(),
         files,
@@ -469,14 +469,14 @@ fn manifest_serialization_roundtrip() {
     files.insert(
         "allies.mix".to_string(),
         FileDigest {
-            sha256: "aa".repeat(32),
+            blake3: "aa".repeat(32),
             size: 1024,
         },
     );
     files.insert(
         "soviet.mix".to_string(),
         FileDigest {
-            sha256: "bb".repeat(32),
+            blake3: "bb".repeat(32),
             size: 2048,
         },
     );
@@ -497,20 +497,20 @@ fn manifest_serialization_roundtrip() {
     assert_eq!(original.files.len(), restored.files.len());
     for (path, digest) in &original.files {
         let rd = restored.files.get(path).expect("missing file entry");
-        assert_eq!(digest.sha256, rd.sha256);
+        assert_eq!(digest.blake3, rd.blake3);
         assert_eq!(digest.size, rd.size);
     }
 }
 
-// ── Sha256Scratch ───────────────────────────────────────────────
+// ── Blake3Scratch ───────────────────────────────────────────────
 
-/// `Sha256Scratch::hash_file` must produce the same digest as `sha256_file`.
+/// `Blake3Scratch::hash_file` must produce the same digest as `blake3_file`.
 ///
 /// The scratch variant is a performance optimization; it must be functionally
-/// identical to the one-shot `sha256_file` function or manifests generated by
+/// identical to the one-shot `blake3_file` function or manifests generated by
 /// one path would not verify correctly against manifests generated by the other.
 #[test]
-fn scratch_hash_matches_sha256_file() {
+fn scratch_hash_matches_blake3_file() {
     let tmp = std::env::temp_dir().join("cnc-verify-scratch");
     let _ = fs::remove_dir_all(&tmp);
     fs::create_dir_all(&tmp).unwrap();
@@ -518,17 +518,17 @@ fn scratch_hash_matches_sha256_file() {
     let path = tmp.join("data.bin");
     fs::write(&path, b"scratch buffer test data").unwrap();
 
-    let direct = sha256_file(&path).unwrap();
-    let mut scratch = Sha256Scratch::new();
+    let direct = blake3_file(&path).unwrap();
+    let mut scratch = Blake3Scratch::new();
     let scratched = scratch.hash_file(&path).unwrap();
     assert_eq!(direct, scratched);
 
     let _ = fs::remove_dir_all(&tmp);
 }
 
-/// Reusing a `Sha256Scratch` across multiple files must yield independent, correct hashes.
+/// Reusing a `Blake3Scratch` across multiple files must yield independent, correct hashes.
 ///
-/// The scratch pattern calls `finalize_reset` to clear hasher state between files.
+/// The scratch pattern resets the hasher between files.
 /// If the reset were missing, earlier file bytes would leak into later digests,
 /// causing false corruption reports for every file after the first.
 #[test]
@@ -542,7 +542,7 @@ fn scratch_reuse_produces_correct_hashes() {
     fs::write(&path_a, b"file A content").unwrap();
     fs::write(&path_b, b"file B different content").unwrap();
 
-    let mut scratch = Sha256Scratch::new();
+    let mut scratch = Blake3Scratch::new();
     let hash_a = scratch.hash_file(&path_a).unwrap();
     let hash_b = scratch.hash_file(&path_b).unwrap();
 
@@ -720,13 +720,13 @@ fn incremental_verify_distributes_files() {
         let data = format!("content for file {i}");
         let path = tmp.join(&name);
         fs::write(&path, data.as_bytes()).unwrap();
-        let sha256 = sha256_file(&path).unwrap();
+        let blake3 = blake3_file(&path).unwrap();
         let size = data.len() as u64;
-        manifest_files.insert(name, FileDigest { sha256, size });
+        manifest_files.insert(name, FileDigest { blake3, size });
     }
 
     let manifest = InstalledContentManifest {
-        version: 1,
+        version: CONTENT_MANIFEST_VERSION,
         game: "test".to_string(),
         content_version: "v1".to_string(),
         files: manifest_files,
@@ -760,13 +760,13 @@ fn incremental_verify_detects_corruption() {
 
     let path = tmp.join("data.bin");
     fs::write(&path, b"original").unwrap();
-    let sha256 = sha256_file(&path).unwrap();
+    let blake3 = blake3_file(&path).unwrap();
 
     let mut files = BTreeMap::new();
-    files.insert("data.bin".to_string(), FileDigest { sha256, size: 8 });
+    files.insert("data.bin".to_string(), FileDigest { blake3, size: 8 });
 
     let manifest = InstalledContentManifest {
-        version: 1,
+        version: CONTENT_MANIFEST_VERSION,
         game: "test".to_string(),
         content_version: "v1".to_string(),
         files,

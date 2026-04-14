@@ -38,15 +38,90 @@
 use std::io;
 use std::path::Path;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use thiserror::Error;
 
+use crate::corruption_ledger::{Attribution, CorruptionLedger};
+use crate::network_id::NetworkId;
 use crate::peer::{Peer, PeerError, PeerKind};
+use crate::peer_id::PeerId;
 use crate::peer_stats::PeerTracker;
+use crate::pex::{PexEntry, PexFlags, PexMessage, MAX_PEX_ADDED};
+use crate::phi_detector::{PhiDetector, SUSPECT_PHI_THRESHOLD};
+use crate::piece_data_cache::PieceDataCache;
 use crate::piece_map::{PieceState, SharedPieceMap};
+use crate::priority::PiecePriorityMap;
+use crate::reader::StreamNotifier;
+use crate::resume::ResumeState;
+use crate::selection::select_next_piece;
+use crate::storage::{FileStorageFactory, StorageError, StorageFactory};
+use crate::streaming::ByteRange;
 use crate::torrent_info::TorrentInfo;
+
+// ── Download mode ───────────────────────────────────────────────────
+
+/// Download strategy: bulk (maximum throughput) or streaming (playback-optimised).
+///
+/// ## Design rationale
+///
+/// Bulk and streaming downloads have fundamentally different performance
+/// profiles. Forcing both through the same code path means one must
+/// compromise:
+///
+/// - **Bulk downloads** want maximum aggregate throughput. Piece order
+///   doesn't matter — sequential scan is fastest for web seeds, and
+///   rarest-first is optimal for swarm health with BT peers. No
+///   per-piece callback overhead, no priority map computation.
+///
+/// - **Streaming downloads** want the *right* pieces *now*. The playhead
+///   piece is life-or-death for stall-free playback. Container metadata
+///   pieces (moov, idx1, SeekHead) must arrive early for seeking. All
+///   other pieces are background fill. Priority-weighted rarest-first
+///   selection is mandatory, and a `StreamNotifier` must wake the reader
+///   after each piece.
+///
+/// Separating these into explicit modes eliminates conditional branches
+/// in the hot path and makes the performance contract clear to callers.
+#[derive(Default)]
+pub enum DownloadMode {
+    /// Maximum throughput, no streaming overhead.
+    ///
+    /// Piece selection: sequential scan (optimal for web-seed-only swarms
+    /// where all peers have all pieces, resulting in sequential disk I/O).
+    /// No priority map, no stream notifications, no per-piece callbacks
+    /// beyond progress reporting.
+    #[default]
+    Bulk,
+
+    /// Streaming playback: priority-weighted piece selection + reader notification.
+    ///
+    /// Piece selection: rarest-first weighted by [`PiecePriorityMap`] so
+    /// playhead and metadata pieces always win. After each verified piece,
+    /// the [`StreamNotifier`] wakes the blocking reader.
+    ///
+    /// The caller is responsible for periodically calling
+    /// [`PiecePriorityMap::update()`] as the playhead advances.
+    Streaming {
+        /// Per-piece priority map (playhead, prebuffer, metadata, background).
+        /// Must be behind `Arc<Mutex<_>>` so the streaming reader can update
+        /// priorities while the coordinator reads them.
+        priority_map: Arc<Mutex<PiecePriorityMap>>,
+        /// Notifier that wakes the [`StreamingReader`](crate::reader::StreamingReader)
+        /// when pieces complete.
+        notifier: StreamNotifier,
+    },
+}
+
+impl std::fmt::Debug for DownloadMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Bulk => f.write_str("Bulk"),
+            Self::Streaming { .. } => f.write_str("Streaming { .. }"),
+        }
+    }
+}
 
 // ── Error types ─────────────────────────────────────────────────────
 
@@ -67,6 +142,11 @@ pub enum CoordinatorError {
     PeerBlacklisted { peer_index: usize, failures: u32 },
     #[error("I/O error writing piece {piece_index}: {source}")]
     Io { piece_index: u32, source: io::Error },
+    #[error("storage error for piece {piece_index}: {source}")]
+    Storage {
+        piece_index: u32,
+        source: StorageError,
+    },
     #[error("download cancelled")]
     Cancelled,
 }
@@ -78,7 +158,6 @@ pub enum CoordinatorError {
 /// All fields have sensible defaults. The design values are informed by D049
 /// transport strategy and production experience from aria2, Blizzard Agent,
 /// and Resilio Sync.
-#[derive(Debug, Clone)]
 pub struct CoordinatorConfig {
     /// Maximum number of concurrent piece downloads across all peers.
     pub max_concurrent_pieces: u32,
@@ -99,6 +178,37 @@ pub struct CoordinatorConfig {
     /// blacklisted for the session. Prevents malicious peers from wasting
     /// bandwidth. Set to 0 to disable blacklisting.
     pub max_peer_failures: u32,
+    /// Path for persistent resume state (FlashGet `.jcd` pattern).
+    ///
+    /// When set, the coordinator saves a checkpoint file after each verified
+    /// piece and loads it on startup. This enables crash recovery without
+    /// re-downloading already-verified pieces. The resume file is deleted
+    /// on successful completion.
+    pub resume_path: Option<std::path::PathBuf>,
+    /// Custom storage factory for piece data.
+    ///
+    /// When `None`, the coordinator uses [`FileStorageFactory`] (direct file
+    /// I/O with pre-allocation). Consumers can provide custom implementations
+    /// for in-memory storage, write coalescing, or database backends.
+    pub storage_factory: Option<Box<dyn StorageFactory>>,
+    /// Download strategy: bulk throughput or streaming playback.
+    ///
+    /// - [`DownloadMode::Bulk`] (default) — sequential piece selection,
+    ///   no priority computation, no stream notification overhead.
+    /// - [`DownloadMode::Streaming`] — priority-weighted rarest-first
+    ///   selection, notifies the streaming reader after each piece.
+    pub download_mode: DownloadMode,
+    /// Optional LRU piece data cache for reducing disk I/O during seeding.
+    ///
+    /// When set, the coordinator inserts verified piece bytes immediately
+    /// after writing to storage (hot-on-arrival pattern). The future upload
+    /// handler checks this cache before falling back to disk reads, avoiding
+    /// redundant I/O for hot pieces requested by multiple peers.
+    ///
+    /// libtorrent uses the same pattern (default 16 MB). For C&C disc ISOs
+    /// (500–700 MB), 32 MB covers the rarest-first convergence window.
+    /// Set to `None` to disable caching (download-only, no seeding).
+    pub piece_data_cache: Option<Arc<PieceDataCache>>,
 }
 
 impl Default for CoordinatorConfig {
@@ -113,7 +223,34 @@ impl Default for CoordinatorConfig {
             endgame_threshold: 5,
             // 3 corrupt pieces → permanent blacklist
             max_peer_failures: 3,
+            resume_path: None,
+            storage_factory: None,
+            download_mode: DownloadMode::Bulk,
+            piece_data_cache: None,
         }
+    }
+}
+
+impl std::fmt::Debug for CoordinatorConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CoordinatorConfig")
+            .field("max_concurrent_pieces", &self.max_concurrent_pieces)
+            .field("max_retries_per_piece", &self.max_retries_per_piece)
+            .field("cancel_flag", &self.cancel_flag)
+            .field("min_peer_speed", &self.min_peer_speed)
+            .field("endgame_threshold", &self.endgame_threshold)
+            .field("max_peer_failures", &self.max_peer_failures)
+            .field("resume_path", &self.resume_path)
+            .field(
+                "storage_factory",
+                &self.storage_factory.as_ref().map(|_| ".."),
+            )
+            .field("download_mode", &self.download_mode)
+            .field(
+                "piece_data_cache",
+                &self.piece_data_cache.as_ref().map(|c| c.stats()),
+            )
+            .finish()
     }
 }
 
@@ -132,6 +269,17 @@ pub enum CoordinatorProgress {
         file_size: u64,
         web_seed_count: usize,
         has_bt_swarm: bool,
+    },
+    /// Download resumed from a checkpoint file — some pieces were already done.
+    ///
+    /// Fired after `Starting` when a valid resume file is found. The
+    /// coordinator has marked the resumed pieces as `Done` in the piece map
+    /// and will skip their download.
+    Resumed {
+        pieces_resumed: u32,
+        pieces_total: u32,
+        /// Approximate bytes already on disk from the previous session.
+        bytes_resumed: u64,
     },
     /// A piece was successfully downloaded and verified.
     PieceComplete {
@@ -164,6 +312,49 @@ pub enum CoordinatorProgress {
         /// Average speed in bytes/sec over the entire download.
         avg_speed: u64,
     },
+    /// Periodic availability snapshot for cooperative downloading (Syncthing
+    /// `DownloadProgress` pattern).
+    ///
+    /// Emitted every N pieces (or at the caller's request) so that external
+    /// systems (swarm peers, UI) know which pieces are available locally.
+    /// This enables cooperative downloading: other peers can avoid requesting
+    /// pieces we already have.
+    AvailabilityUpdate {
+        /// Bitset of completed pieces (index = piece number).
+        completed_pieces: Vec<bool>,
+        /// Total pieces in the torrent.
+        piece_count: u32,
+        /// Current download speed in bytes/sec (EWMA).
+        download_speed: u64,
+    },
+}
+
+// ── Coordinator shared mutable state ────────────────────────────────
+
+/// Mutable per-peer and per-piece tracking state for the coordinator.
+///
+/// Wrapped in a single `Mutex` during concurrent piece fetching. The lock
+/// is held only for O(peers) bookkeeping operations (microseconds), never
+/// during network I/O (the expensive part). A single Mutex avoids the
+/// deadlock risk of multiple fine-grained locks while keeping contention
+/// negligible relative to network latency.
+struct CoordinatorMutableState {
+    /// SHA-1 mismatch count per peer (for blacklisting).
+    peer_failures: Vec<u32>,
+    /// Whether each peer is permanently blacklisted.
+    peer_blacklisted: Vec<bool>,
+    /// Number of retry attempts per piece.
+    retry_counts: Vec<u32>,
+    /// Which peer last failed each piece (for retry rotation).
+    last_failed_peer: Vec<Option<usize>>,
+    /// Cumulative bytes downloaded across all peers.
+    bytes_downloaded: u64,
+    /// Per-peer composite scoring stats (D049 formula).
+    tracker: PeerTracker,
+    /// Per-peer phi accrual failure detectors (Cassandra pattern).
+    phi_detectors: Vec<PhiDetector>,
+    /// Per-piece byte-range attribution (aMule CorruptionBlackBox).
+    corruption_ledger: CorruptionLedger,
 }
 
 // ── PieceCoordinator ────────────────────────────────────────────────
@@ -249,30 +440,82 @@ impl PieceCoordinator {
         &self.info
     }
 
+    /// Builds a PEX (Peer Exchange) message advertising the coordinator's
+    /// known peers.
+    ///
+    /// The message includes only peers that have a stable identity
+    /// ([`Peer::peer_id`] returns `Some`). Anonymous peers are excluded
+    /// because PEX entries require a [`PeerId`] for meaningful gossip.
+    ///
+    /// Returns `None` if no identifiable peers exist. The caller is
+    /// responsible for sending the message at the BEP-11 recommended
+    /// interval ([`pex::PEX_INTERVAL_SECS`]).
+    pub fn build_pex_message(&self, network_id: NetworkId) -> Option<PexMessage> {
+        if self.peers.is_empty() {
+            return None;
+        }
+
+        let mut msg = PexMessage::new(network_id);
+
+        for peer in &self.peers {
+            if msg.added.len() >= MAX_PEX_ADDED {
+                break;
+            }
+
+            // Only include peers with a stable identity.
+            let Some(id_str) = peer.peer_id() else {
+                continue;
+            };
+
+            let flags = PexFlags {
+                seed: peer.has_piece(0),
+                encryption: false,
+                utp: false,
+                utp_holepunch: false,
+                connectable: peer.kind() == PeerKind::WebSeed,
+            };
+
+            msg.added.push(PexEntry {
+                peer_id: PeerId::from_key_material(id_str.as_bytes()),
+                addr: id_str.to_string(),
+                flags,
+            });
+        }
+
+        if msg.is_empty() {
+            None
+        } else {
+            Some(msg)
+        }
+    }
+
     /// Runs the download to completion, writing pieces to the output file.
     ///
-    /// Creates or opens the output file, downloads all pieces by assigning
-    /// them to available peers, SHA-1 verifies each piece, and writes
-    /// verified data to the correct offset in the file.
+    /// Downloads all pieces by assigning them to available peers, SHA-1
+    /// verifies each piece, and writes verified data to the correct offset.
+    /// When `max_concurrent_pieces > 1`, multiple pieces are fetched in
+    /// parallel using scoped threads — each thread claims pieces via the
+    /// atomic [`SharedPieceMap`], fetches from the selected peer (network
+    /// I/O runs outside any lock), then briefly locks shared state for
+    /// bookkeeping.
     ///
     /// Calls `on_progress` after each piece completes or fails.
     ///
     /// ## Cancellation
     ///
     /// The cancel flag is checked between pieces (graceful cancellation).
-    /// The current piece finishes naturally before returning `Cancelled`,
-    /// avoiding wasted bytes from partial piece writes.
+    /// In-flight pieces finish naturally before returning `Cancelled`.
     ///
     /// ## Errors
     ///
     /// - `NoPeers` if no peers have been added
     /// - `AllPeersFailed` if a piece exhausts all retry attempts
     /// - `Cancelled` if the cancel flag is set
-    /// - `Io` for file system errors
+    /// - `Io` / `Storage` for file system errors
     pub fn run(
         &self,
         output_path: &Path,
-        on_progress: &mut dyn FnMut(CoordinatorProgress),
+        on_progress: &mut (dyn FnMut(CoordinatorProgress) + Send),
     ) -> Result<(), CoordinatorError> {
         if self.peers.is_empty() {
             return Err(CoordinatorError::NoPeers);
@@ -292,258 +535,617 @@ impl PieceCoordinator {
             has_bt_swarm,
         });
 
-        // Pre-allocate the output file to the expected size so pieces can be
-        // written at arbitrary offsets without sparse-file concerns.
-        let file =
-            Self::prepare_output_file(output_path, self.info.file_size).map_err(|source| {
-                CoordinatorError::Io {
-                    piece_index: 0,
-                    source,
-                }
+        // ── Resume from checkpoint (FlashGet .jcd pattern) ──────────
+        let resuming = self.try_load_resume(on_progress);
+
+        // ── Storage ─────────────────────────────────────────────────
+        let factory: &dyn StorageFactory = match self.config.storage_factory {
+            Some(ref f) => f.as_ref(),
+            None => &FileStorageFactory,
+        };
+        let storage = factory
+            .create_storage(output_path, self.info.file_size, resuming)
+            .map_err(|source| CoordinatorError::Storage {
+                piece_index: 0,
+                source,
             })?;
-        let file = Arc::new(std::sync::Mutex::new(file));
 
-        // ── Per-peer failure tracking (for blacklisting) ────────────
-        //
-        // Tracks SHA-1 mismatch count per peer. When a peer exceeds
-        // `max_peer_failures`, it is blacklisted (excluded from selection).
-        // This prevents malicious or broken peers from wasting bandwidth.
-        let mut peer_failures: Vec<u32> = vec![0; self.peers.len()];
-        let mut peer_blacklisted: Vec<bool> = vec![false; self.peers.len()];
-
-        // ── Per-piece retry tracking ────────────────────────────────
-        let mut retry_counts: Vec<u32> = vec![0; self.info.piece_count() as usize];
-
-        // Track which peer last failed each piece (for retry rotation).
-        // `None` means no failure yet (or the piece has been retried on all peers).
-        let mut last_failed_peer: Vec<Option<usize>> = vec![None; self.info.piece_count() as usize];
-
-        // ── Timing for speed/ETA reporting ──────────────────────────
         let start_time = Instant::now();
-        let mut bytes_downloaded: u64 = 0;
 
-        // ── Per-peer session stats (composite scoring) ──────────────
+        // ── Shared mutable state (Mutex-protected) ──────────────────
         //
-        // Tracks per-peer performance history for composite scoring in
-        // peer selection. D049 formula: Speed(0.4) + Reliability(0.3) +
-        // Availability(0.2) + Recency(0.1).
-        let mut tracker = PeerTracker::new(self.peers.len(), start_time);
+        // All per-peer and per-piece tracking is bundled into a single
+        // struct behind one Mutex. The lock is held only for bookkeeping
+        // (microseconds), never during network I/O (the slow part).
+        // This enables concurrent piece fetching with minimal contention.
+        let shared = Mutex::new(CoordinatorMutableState {
+            peer_failures: vec![0; self.peers.len()],
+            peer_blacklisted: vec![false; self.peers.len()],
+            retry_counts: vec![0; self.info.piece_count() as usize],
+            last_failed_peer: vec![None; self.info.piece_count() as usize],
+            bytes_downloaded: 0,
+            tracker: PeerTracker::new(self.peers.len(), start_time),
+            phi_detectors: (0..self.peers.len())
+                .map(|_| PhiDetector::new(start_time))
+                .collect(),
+            corruption_ledger: CorruptionLedger::new(),
+        });
 
-        loop {
-            // Graceful cancellation: checked between pieces so the current
-            // piece finishes naturally, avoiding wasted partial writes.
-            if self.config.cancel_flag.load(Ordering::Acquire) {
-                return Err(CoordinatorError::Cancelled);
-            }
+        // Progress callback must also be serialized across threads.
+        let on_progress = Mutex::new(on_progress);
 
-            if self.piece_map.is_complete() {
-                break;
-            }
+        // ── Determine concurrency level ─────────────────────────────
+        //
+        // Use min(max_concurrent_pieces, peer_count) worker threads.
+        // A single peer can only serve one piece at a time, so there's no
+        // benefit to more threads than peers.
+        let concurrency = (self.config.max_concurrent_pieces as usize)
+            .min(self.peers.len())
+            .max(1);
 
-            // ── Endgame heuristic ───────────────────────────────────
-            //
-            // When remaining pieces ≤ endgame_threshold, aggressively reset
-            // failed pieces for immediate retry from any peer. D049 specifies
-            // threshold=5. All production BT clients implement endgame mode.
-            let remaining = self
-                .info
-                .piece_count()
-                .saturating_sub(self.piece_map.done_count());
-            let in_endgame = remaining <= self.config.endgame_threshold;
+        // ── Worker loop: claim → select → fetch → verify → write ────
+        //
+        // Each worker thread independently finds pieces to download. The
+        // atomic SharedPieceMap ensures no two threads claim the same piece.
+        // Peer selection happens under the shared Mutex (brief), then the
+        // network fetch runs without any lock held (the expensive part).
+        //
+        // When a global error is detected (storage failure, permanent piece
+        // failure), it's stored in this Arc and the cancel flag is set so
+        // all workers drain gracefully.
+        let fatal_error: Arc<Mutex<Option<CoordinatorError>>> = Arc::new(Mutex::new(None));
 
-            // Reset any Failed pieces that haven't exhausted retries.
-            for i in 0..self.info.piece_count() {
-                if self.piece_map.get(i) == PieceState::Failed {
-                    let retries = retry_counts.get(i as usize).copied().unwrap_or(0);
-                    // In endgame mode, allow extra retries.
-                    let max_retries = if in_endgame {
-                        self.config.max_retries_per_piece.saturating_mul(2)
-                    } else {
-                        self.config.max_retries_per_piece
-                    };
-                    if retries < max_retries {
-                        self.piece_map.retry_failed(i);
-                    }
-                }
-            }
+        std::thread::scope(|scope| {
+            for _worker_id in 0..concurrency {
+                let shared = &shared;
+                let storage = &storage;
+                let on_progress = &on_progress;
+                let fatal_error = Arc::clone(&fatal_error);
 
-            // Find the next needed piece.
-            let Some(piece_index) = self.piece_map.next_needed() else {
-                // No needed pieces — check if all are done or some are permanently failed.
-                if self.piece_map.is_complete() {
-                    break;
-                }
-                // Find the first permanently failed piece for error reporting.
-                let failed_piece = (0..self.info.piece_count())
-                    .find(|&i| self.piece_map.get(i) == PieceState::Failed);
-                if let Some(pi) = failed_piece {
-                    return Err(CoordinatorError::AllPeersFailed {
-                        piece_index: pi,
-                        attempts: retry_counts.get(pi as usize).copied().unwrap_or(0),
-                    });
-                }
-                break;
-            };
-
-            // Claim the piece atomically.
-            if !self.piece_map.try_claim(piece_index) {
-                continue;
-            }
-
-            // ── Peer selection with retry rotation ──────────────────
-            //
-            // Selects the best peer, but excludes the peer that last failed
-            // this specific piece. This ensures we try a different source
-            // before retrying the same one. (aria2 pattern)
-            let last_fail = last_failed_peer
-                .get(piece_index as usize)
-                .copied()
-                .flatten();
-            let peer_result = self.select_peer_with_exclusion(
-                piece_index,
-                last_fail,
-                &peer_blacklisted,
-                &tracker,
-                Instant::now(),
-            );
-            let Some((peer_idx, peer)) = peer_result else {
-                self.piece_map.mark_failed(piece_index);
-                if let Some(r) = retry_counts.get_mut(piece_index as usize) {
-                    *r = r.saturating_add(1);
-                }
-                continue;
-            };
-
-            let offset = self.info.piece_offset(piece_index);
-            let length = self.info.piece_size(piece_index);
-            let peer_kind = peer.kind();
-
-            // Fetch the piece from the selected peer.
-            let fetch_start = Instant::now();
-            match peer.fetch_piece(piece_index, offset, length) {
-                Ok(data) => {
-                    // SHA-1 verify the piece.
-                    if let Err(e) = self.verify_piece(piece_index, &data) {
-                        self.piece_map.mark_failed(piece_index);
-                        if let Some(r) = retry_counts.get_mut(piece_index as usize) {
-                            *r = r.saturating_add(1);
+                scope.spawn(move || {
+                    loop {
+                        // ── Check termination conditions ────────────
+                        if self.config.cancel_flag.load(Ordering::Acquire) {
+                            break;
                         }
-                        // Track which peer failed this piece (for retry rotation).
-                        if let Some(slot) = last_failed_peer.get_mut(piece_index as usize) {
-                            *slot = Some(peer_idx);
+                        if self.piece_map.is_complete() {
+                            break;
+                        }
+                        if fatal_error.lock().ok().is_some_and(|e| e.is_some()) {
+                            break;
                         }
 
-                        // Record corruption in peer stats tracker.
-                        if let Some(s) = tracker.get_mut(peer_idx) {
-                            s.record_corruption(Instant::now());
-                        }
+                        // ── Endgame: reset failed pieces for retry ──
+                        // Brief lock to read retry_counts for endgame reset.
+                        {
+                            let state = shared.lock().unwrap_or_else(|e| e.into_inner());
+                            let remaining = self
+                                .info
+                                .piece_count()
+                                .saturating_sub(self.piece_map.done_count());
+                            let in_endgame = remaining <= self.config.endgame_threshold;
 
-                        // Increment peer corruption counter (for blacklisting).
-                        if let Some(count) = peer_failures.get_mut(peer_idx) {
-                            *count = count.saturating_add(1);
-                            if self.config.max_peer_failures > 0
-                                && *count >= self.config.max_peer_failures
-                                && !peer_blacklisted.get(peer_idx).copied().unwrap_or(false)
-                            {
-                                if let Some(bl) = peer_blacklisted.get_mut(peer_idx) {
-                                    *bl = true;
+                            for i in 0..self.info.piece_count() {
+                                if self.piece_map.get(i) == PieceState::Failed {
+                                    let retries =
+                                        state.retry_counts.get(i as usize).copied().unwrap_or(0);
+                                    let max_retries = if in_endgame {
+                                        self.config.max_retries_per_piece.saturating_mul(2)
+                                    } else {
+                                        self.config.max_retries_per_piece
+                                    };
+                                    if retries < max_retries {
+                                        self.piece_map.retry_failed(i);
+                                    }
                                 }
-                                on_progress(CoordinatorProgress::PeerBlacklisted {
-                                    peer_index: peer_idx,
-                                    peer_kind,
-                                    failure_count: *count,
-                                });
                             }
                         }
 
-                        on_progress(CoordinatorProgress::PieceRetry {
-                            piece_index,
-                            peer_kind,
-                            error: e.to_string(),
-                        });
-                        continue;
-                    }
+                        // ── Claim the next needed piece (lock-free) ─
+                        let Some(piece_index) = self.claim_next_piece() else {
+                            // No pieces available right now. If all are Done,
+                            // or InFlight by other threads, break or yield.
+                            if self.piece_map.is_complete() {
+                                break;
+                            }
+                            // Check if any pieces are still InFlight (other
+                            // threads working) or Needed. If everything is
+                            // either Done or permanently Failed (not Needed,
+                            // not InFlight), we're stuck — break and let the
+                            // post-loop error check report AllPeersFailed.
+                            let any_in_progress = (0..self.info.piece_count()).any(|i| {
+                                let s = self.piece_map.get(i);
+                                s == PieceState::Needed || s == PieceState::InFlight
+                            });
+                            if !any_in_progress {
+                                break;
+                            }
+                            // Other threads are working on the remaining
+                            // pieces. Briefly yield and retry.
+                            std::thread::yield_now();
+                            continue;
+                        };
 
-                    // Write verified piece data to the output file at the correct offset.
-                    // Record successful fetch in peer stats tracker.
-                    if let Some(s) = tracker.get_mut(peer_idx) {
-                        s.record_success(data.len() as u64, fetch_start.elapsed(), Instant::now());
-                    }
-                    {
-                        use std::io::{Seek, Write};
-                        let mut f = file.lock().map_err(|_| CoordinatorError::Io {
-                            piece_index,
-                            source: io::Error::other("file lock poisoned"),
-                        })?;
-                        f.seek(io::SeekFrom::Start(offset)).map_err(|source| {
-                            CoordinatorError::Io {
+                        // ── Select peer (brief lock) ────────────────
+                        let (peer_idx, peer_kind) = {
+                            let state = shared.lock().unwrap_or_else(|e| e.into_inner());
+                            let last_fail = state
+                                .last_failed_peer
+                                .get(piece_index as usize)
+                                .copied()
+                                .flatten();
+                            match self.select_peer_with_exclusion(
                                 piece_index,
-                                source,
+                                last_fail,
+                                &state.peer_blacklisted,
+                                &state.tracker,
+                                &state.phi_detectors,
+                                Instant::now(),
+                            ) {
+                                Some((idx, peer)) => (idx, peer.kind()),
+                                None => {
+                                    // No eligible peer — mark piece failed.
+                                    self.piece_map.mark_failed(piece_index);
+                                    drop(state);
+                                    let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
+                                    if let Some(r) = s.retry_counts.get_mut(piece_index as usize) {
+                                        *r = r.saturating_add(1);
+                                    }
+                                    continue;
+                                }
                             }
-                        })?;
-                        f.write_all(&data).map_err(|source| CoordinatorError::Io {
-                            piece_index,
-                            source,
-                        })?;
-                    }
+                        };
 
-                    self.piece_map.mark_done(piece_index);
-                    bytes_downloaded = bytes_downloaded.saturating_add(data.len() as u64);
-                    let elapsed = start_time.elapsed().as_secs_f64();
+                        // ── Fetch piece (NO lock held — network I/O) ─
+                        let offset = self.info.piece_offset(piece_index);
+                        let length = self.info.piece_size(piece_index);
+                        let peer = self
+                            .peers
+                            .get(peer_idx)
+                            .map(|p| p.as_ref())
+                            .expect("peer_idx from select must be valid");
+                        let fetch_start = Instant::now();
+                        let fetch_result = peer.fetch_piece(piece_index, offset, length);
 
-                    on_progress(CoordinatorProgress::PieceComplete {
-                        piece_index,
-                        pieces_done: self.piece_map.done_count(),
-                        pieces_total: self.info.piece_count(),
-                        peer_kind,
-                        bytes_downloaded,
-                        elapsed_secs: elapsed,
-                    });
-                }
-                Err(e) => {
-                    // Record failure type in peer stats tracker.
-                    if let Some(s) = tracker.get_mut(peer_idx) {
-                        let now = Instant::now();
-                        match &e {
-                            PeerError::Timeout { .. } => s.record_timeout(now),
-                            PeerError::Rejected { reason, .. } => {
-                                s.record_rejection(reason.clone(), now);
+                        // ── Process result (brief lock) ─────────────
+                        match fetch_result {
+                            Ok(data) => {
+                                // SHA-1 verify (no lock needed — pure computation).
+                                if let Err(e) = self.verify_piece(piece_index, &data) {
+                                    self.piece_map.mark_failed(piece_index);
+                                    let mut state =
+                                        shared.lock().unwrap_or_else(|e| e.into_inner());
+                                    self.handle_hash_failure(
+                                        piece_index,
+                                        peer_idx,
+                                        peer_kind,
+                                        length,
+                                        &e,
+                                        &mut state,
+                                        on_progress,
+                                    );
+                                    continue;
+                                }
+
+                                // Write verified piece (PieceStorage is Send+Sync).
+                                if let Err(source) = storage.write_piece(piece_index, offset, &data)
+                                {
+                                    // Storage error is fatal — signal all workers.
+                                    self.config.cancel_flag.store(true, Ordering::Release);
+                                    if let Ok(mut fe) = fatal_error.lock() {
+                                        *fe = Some(CoordinatorError::Storage {
+                                            piece_index,
+                                            source,
+                                        });
+                                    }
+                                    break;
+                                }
+
+                                self.piece_map.mark_done(piece_index);
+
+                                // Hot-on-arrival: cache verified piece bytes
+                                // so the upload path can serve them from RAM.
+                                // Freshly downloaded pieces are the hottest in
+                                // the swarm (rarest-first causes many peers to
+                                // request the same piece). Inserting here avoids
+                                // a wasteful read-back when seeding starts.
+                                // The cache is Arc<PieceDataCache> (Send+Sync),
+                                // so this is safe from any worker thread.
+                                if let Some(ref cache) = self.config.piece_data_cache {
+                                    cache.insert(piece_index, data.clone());
+                                }
+
+                                // Streaming mode: notify the reader that a
+                                // new byte range is available. This wakes any
+                                // blocking StreamingReader::read() call that
+                                // is waiting on this piece. Done outside the
+                                // Mutex — StreamNotifier uses its own condvar.
+                                if let DownloadMode::Streaming { ref notifier, .. } =
+                                    self.config.download_mode
+                                {
+                                    notifier.piece_completed(ByteRange {
+                                        start: offset,
+                                        end: offset.saturating_add(data.len() as u64),
+                                    });
+                                }
+
+                                // Update tracking state (brief lock).
+                                let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
+                                self.handle_piece_success(
+                                    piece_index,
+                                    peer_idx,
+                                    peer_kind,
+                                    &data,
+                                    fetch_start,
+                                    start_time,
+                                    &mut state,
+                                    on_progress,
+                                );
                             }
-                            _ => s.record_failure(now),
+                            Err(e) => {
+                                self.piece_map.mark_failed(piece_index);
+                                let mut state = shared.lock().unwrap_or_else(|e| e.into_inner());
+                                self.handle_fetch_failure(
+                                    piece_index,
+                                    peer_idx,
+                                    peer_kind,
+                                    &e,
+                                    &mut state,
+                                    on_progress,
+                                );
+                            }
                         }
                     }
+                });
+            }
+        });
 
-                    self.piece_map.mark_failed(piece_index);
-                    if let Some(r) = retry_counts.get_mut(piece_index as usize) {
-                        *r = r.saturating_add(1);
+        // ── Check for fatal errors from workers ─────────────────────
+        if let Some(err) = fatal_error.lock().ok().and_then(|mut e| e.take()) {
+            return Err(err);
+        }
+
+        // Cancellation check after all workers have exited.
+        if self.config.cancel_flag.load(Ordering::Acquire) {
+            return Err(CoordinatorError::Cancelled);
+        }
+
+        // Check if we actually completed or if all pieces failed.
+        if !self.piece_map.is_complete() {
+            let state = shared.lock().unwrap_or_else(|e| e.into_inner());
+            let failed_piece =
+                (0..self.info.piece_count()).find(|&i| self.piece_map.get(i) == PieceState::Failed);
+            if let Some(pi) = failed_piece {
+                return Err(CoordinatorError::AllPeersFailed {
+                    piece_index: pi,
+                    attempts: state.retry_counts.get(pi as usize).copied().unwrap_or(0),
+                });
+            }
+        }
+
+        let state = shared.lock().unwrap_or_else(|e| e.into_inner());
+        let elapsed = start_time.elapsed().as_secs_f64();
+        let avg_speed = if elapsed > 0.0 {
+            (state.bytes_downloaded as f64 / elapsed) as u64
+        } else {
+            0
+        };
+        drop(state);
+
+        // Flush storage to ensure all piece data is durable.
+        storage
+            .flush()
+            .map_err(|source| CoordinatorError::Storage {
+                piece_index: self.info.piece_count().saturating_sub(1),
+                source,
+            })?;
+
+        if let Ok(mut cb) = on_progress.lock() {
+            cb(CoordinatorProgress::Complete {
+                file_size: self.info.file_size,
+                elapsed_secs: elapsed,
+                avg_speed,
+            });
+        }
+
+        // Delete resume file — download is done.
+        if let Some(ref resume_path) = self.config.resume_path {
+            let _ = std::fs::remove_file(resume_path);
+        }
+
+        Ok(())
+    }
+
+    /// Claims the next needed piece by scanning the piece map and atomically
+    /// transitioning it from `Needed` to `InFlight`.
+    ///
+    /// Returns `None` if no `Needed` piece exists (all are `Done`, `InFlight`,
+    /// or `Failed`).
+    ///
+    /// ## Mode-dependent selection
+    ///
+    /// - **Bulk** — sequential scan via [`SharedPieceMap::next_needed`].
+    ///   Zero allocation, lock-free CAS. Optimal for web-seed-only swarms
+    ///   where all peers have all pieces, producing sequential disk I/O.
+    ///
+    /// - **Streaming** — priority-weighted rarest-first via
+    ///   [`select_next_piece`]. Builds a transient needed list and peer
+    ///   bitfield snapshot each call (allocation cost is acceptable since
+    ///   piece fetch is orders of magnitude slower). Ensures playhead and
+    ///   metadata pieces are fetched first.
+    fn claim_next_piece(&self) -> Option<u32> {
+        match self.config.download_mode {
+            DownloadMode::Bulk => self.claim_next_piece_bulk(),
+            DownloadMode::Streaming {
+                ref priority_map, ..
+            } => self.claim_next_piece_streaming(priority_map),
+        }
+    }
+
+    /// Bulk mode: sequential scan + CAS. Lock-free, zero-allocation.
+    fn claim_next_piece_bulk(&self) -> Option<u32> {
+        // Scan for Needed pieces and try to claim one. Another thread may
+        // claim the same piece between next_needed() and try_claim(), so
+        // we retry on CAS failure.
+        for _ in 0..self.info.piece_count() {
+            if let Some(idx) = self.piece_map.next_needed() {
+                if self.piece_map.try_claim(idx) {
+                    return Some(idx);
+                }
+            } else {
+                return None;
+            }
+        }
+        None
+    }
+
+    /// Streaming mode: priority-weighted rarest-first piece selection.
+    ///
+    /// Builds a snapshot of needed pieces and peer availability, then
+    /// delegates to [`select_next_piece`] which scores each candidate
+    /// by `rarity × priority_weight`. The highest-scored piece is
+    /// claimed via CAS; on CAS failure (another thread claimed it),
+    /// the next-best candidate is tried.
+    fn claim_next_piece_streaming(
+        &self,
+        priority_map: &Arc<Mutex<PiecePriorityMap>>,
+    ) -> Option<u32> {
+        use crate::bitfield::PeerBitfield;
+
+        // Build needed list — all pieces still in Needed state.
+        let needed: Vec<u32> = (0..self.info.piece_count())
+            .filter(|&i| self.piece_map.get(i) == PieceState::Needed)
+            .collect();
+        if needed.is_empty() {
+            return None;
+        }
+
+        // Build per-peer bitfields. Web seeds report `new_full()` since
+        // they can serve any piece; BT peers would provide real bitfields
+        // (plumbed through the Peer trait's `has_piece` for now).
+        let peer_bitfields: Vec<PeerBitfield> = self
+            .peers
+            .iter()
+            .map(|peer| {
+                if peer.kind() == PeerKind::WebSeed {
+                    PeerBitfield::new_full(self.info.piece_count())
+                } else {
+                    // Build bitfield from the Peer trait's has_piece() queries.
+                    let mut bf = PeerBitfield::new_empty(self.info.piece_count());
+                    for i in 0..self.info.piece_count() {
+                        if peer.has_piece(i) {
+                            bf.set_piece(i);
+                        }
                     }
-                    // Track which peer failed this piece (for retry rotation).
-                    if let Some(slot) = last_failed_peer.get_mut(piece_index as usize) {
-                        *slot = Some(peer_idx);
-                    }
-                    on_progress(CoordinatorProgress::PieceRetry {
-                        piece_index,
+                    bf
+                }
+            })
+            .collect();
+
+        let bf_refs: Vec<&PeerBitfield> = peer_bitfields.iter().collect();
+
+        // Lock the priority map briefly to score pieces.
+        let pm = priority_map.lock().unwrap_or_else(|e| e.into_inner());
+
+        // Use `select_next_piece` which computes rarity scores and weights
+        // by priority, returning the highest-scored candidate.
+        let selection = select_next_piece(&needed, &bf_refs, &pm, self.info.piece_count());
+        drop(pm);
+
+        // Try to claim the selected piece. On CAS failure (another thread
+        // got it), fall back to sequential scan as a simple recovery path.
+        if let Some(sel) = selection {
+            if self.piece_map.try_claim(sel.piece_index) {
+                return Some(sel.piece_index);
+            }
+        }
+
+        // CAS contention fallback: try the remaining needed pieces in order.
+        needed
+            .iter()
+            .find(|&&idx| self.piece_map.try_claim(idx))
+            .copied()
+    }
+
+    /// Bookkeeping for a successful piece download (called under lock).
+    #[allow(clippy::too_many_arguments)]
+    fn handle_piece_success(
+        &self,
+        piece_index: u32,
+        peer_idx: usize,
+        peer_kind: PeerKind,
+        data: &[u8],
+        fetch_start: Instant,
+        start_time: Instant,
+        state: &mut CoordinatorMutableState,
+        on_progress: &Mutex<&mut (dyn FnMut(CoordinatorProgress) + Send)>,
+    ) {
+        // Record successful fetch in peer stats.
+        if let Some(s) = state.tracker.get_mut(peer_idx) {
+            s.record_success(data.len() as u64, fetch_start.elapsed(), Instant::now());
+        }
+        // Record heartbeat in phi detector.
+        if let Some(phi) = state.phi_detectors.get_mut(peer_idx) {
+            phi.record_heartbeat(Instant::now());
+        }
+        // Clear corruption ledger for this piece.
+        state.corruption_ledger.clear_piece(piece_index);
+
+        state.bytes_downloaded = state.bytes_downloaded.saturating_add(data.len() as u64);
+        let elapsed = start_time.elapsed().as_secs_f64();
+
+        if let Ok(mut cb) = on_progress.lock() {
+            cb(CoordinatorProgress::PieceComplete {
+                piece_index,
+                pieces_done: self.piece_map.done_count(),
+                pieces_total: self.info.piece_count(),
+                peer_kind,
+                bytes_downloaded: state.bytes_downloaded,
+                elapsed_secs: elapsed,
+            });
+        }
+
+        // Auto-save resume checkpoint.
+        if let Some(ref resume_path) = self.config.resume_path {
+            let resume_state = ResumeState::from_piece_map(&self.piece_map, self.info.file_size);
+            let _ = resume_state.save(resume_path);
+        }
+
+        // Periodic availability broadcast (every 10 pieces).
+        let done_count = self.piece_map.done_count();
+        if done_count.is_multiple_of(10) || done_count == self.info.piece_count() {
+            let completed: Vec<bool> = (0..self.info.piece_count())
+                .map(|i| self.piece_map.get(i) == PieceState::Done)
+                .collect();
+            let speed = if elapsed > 0.0 {
+                (state.bytes_downloaded as f64 / elapsed) as u64
+            } else {
+                0
+            };
+            if let Ok(mut cb) = on_progress.lock() {
+                cb(CoordinatorProgress::AvailabilityUpdate {
+                    completed_pieces: completed,
+                    piece_count: self.info.piece_count(),
+                    download_speed: speed,
+                });
+            }
+        }
+    }
+
+    /// Bookkeeping for a SHA-1 hash failure (called under lock).
+    #[allow(clippy::too_many_arguments)]
+    fn handle_hash_failure(
+        &self,
+        piece_index: u32,
+        peer_idx: usize,
+        peer_kind: PeerKind,
+        piece_length: u32,
+        error: &CoordinatorError,
+        state: &mut CoordinatorMutableState,
+        on_progress: &Mutex<&mut (dyn FnMut(CoordinatorProgress) + Send)>,
+    ) {
+        if let Some(r) = state.retry_counts.get_mut(piece_index as usize) {
+            *r = r.saturating_add(1);
+        }
+        if let Some(slot) = state.last_failed_peer.get_mut(piece_index as usize) {
+            *slot = Some(peer_idx);
+        }
+
+        // Record corruption in peer stats tracker.
+        if let Some(s) = state.tracker.get_mut(peer_idx) {
+            s.record_corruption(Instant::now());
+        }
+
+        // Blame analysis (aMule CorruptionBlackBox).
+        state.corruption_ledger.record(
+            piece_index,
+            Attribution {
+                start: 0,
+                end: piece_length,
+                peer_index: peer_idx,
+            },
+        );
+        let blame = state
+            .corruption_ledger
+            .blame_analysis(piece_index, piece_length);
+        for entry in &blame {
+            if entry.should_escalate {
+                if let Some(s) = state.tracker.get_mut(entry.peer_index) {
+                    s.apply_exclusion(Instant::now());
+                }
+            }
+        }
+        state.corruption_ledger.clear_piece(piece_index);
+
+        // Peer blacklisting.
+        if let Some(count) = state.peer_failures.get_mut(peer_idx) {
+            *count = count.saturating_add(1);
+            if self.config.max_peer_failures > 0
+                && *count >= self.config.max_peer_failures
+                && !state
+                    .peer_blacklisted
+                    .get(peer_idx)
+                    .copied()
+                    .unwrap_or(false)
+            {
+                if let Some(bl) = state.peer_blacklisted.get_mut(peer_idx) {
+                    *bl = true;
+                }
+                if let Ok(mut cb) = on_progress.lock() {
+                    cb(CoordinatorProgress::PeerBlacklisted {
+                        peer_index: peer_idx,
                         peer_kind,
-                        error: e.to_string(),
+                        failure_count: *count,
                     });
                 }
             }
         }
 
-        let elapsed = start_time.elapsed().as_secs_f64();
-        let avg_speed = if elapsed > 0.0 {
-            (bytes_downloaded as f64 / elapsed) as u64
-        } else {
-            0
-        };
+        if let Ok(mut cb) = on_progress.lock() {
+            cb(CoordinatorProgress::PieceRetry {
+                piece_index,
+                peer_kind,
+                error: error.to_string(),
+            });
+        }
+    }
 
-        on_progress(CoordinatorProgress::Complete {
-            file_size: self.info.file_size,
-            elapsed_secs: elapsed,
-            avg_speed,
-        });
+    /// Bookkeeping for a fetch failure (network error, timeout, etc.).
+    fn handle_fetch_failure(
+        &self,
+        piece_index: u32,
+        peer_idx: usize,
+        peer_kind: PeerKind,
+        error: &PeerError,
+        state: &mut CoordinatorMutableState,
+        on_progress: &Mutex<&mut (dyn FnMut(CoordinatorProgress) + Send)>,
+    ) {
+        // Record failure type in peer stats tracker.
+        if let Some(s) = state.tracker.get_mut(peer_idx) {
+            let now = Instant::now();
+            match error {
+                PeerError::Timeout { .. } => s.record_timeout(now),
+                PeerError::Rejected { reason, .. } => {
+                    s.record_rejection(reason.clone(), now);
+                }
+                _ => s.record_failure(now),
+            }
+        }
 
-        Ok(())
+        if let Some(r) = state.retry_counts.get_mut(piece_index as usize) {
+            *r = r.saturating_add(1);
+        }
+        if let Some(slot) = state.last_failed_peer.get_mut(piece_index as usize) {
+            *slot = Some(peer_idx);
+        }
+
+        if let Ok(mut cb) = on_progress.lock() {
+            cb(CoordinatorProgress::PieceRetry {
+                piece_index,
+                peer_kind,
+                error: error.to_string(),
+            });
+        }
     }
 
     /// Selects the best peer for a piece, excluding blacklisted peers and
@@ -570,6 +1172,7 @@ impl PieceCoordinator {
         excluded_peer: Option<usize>,
         blacklisted: &[bool],
         tracker: &PeerTracker,
+        phi_detectors: &[PhiDetector],
         now: Instant,
     ) -> Option<(usize, &dyn Peer)> {
         // Primary selection: best eligible peer excluding the last-failed peer.
@@ -590,11 +1193,21 @@ impl PieceCoordinator {
                     && !tracker
                         .get(*i)
                         .is_some_and(|s| s.should_avoid_permanently())
+                    // Skip peers in timed exclusion (aMule DeadSourceList).
+                    && !tracker.get(*i).is_some_and(|s| s.is_excluded(now))
             })
             .max_by_key(|(i, p)| {
                 // D049 composite score as primary key, speed estimate as tiebreaker.
                 let score = tracker.composite_score(*i, now);
-                (score, p.speed_estimate())
+                // PhiDetector penalty: suspect peers (phi ≥ 3.0) get their
+                // score halved. This deprioritises "zombie" peers without
+                // fully banning them. Cassandra/Akka pattern — gradual
+                // degradation rather than binary alive/dead.
+                let phi_penalty = phi_detectors
+                    .get(*i)
+                    .is_some_and(|d| d.phi(now) >= SUSPECT_PHI_THRESHOLD);
+                let adjusted_score = if phi_penalty { score / 2 } else { score };
+                (adjusted_score, p.speed_estimate())
             });
 
         if let Some((idx, peer)) = primary {
@@ -604,6 +1217,7 @@ impl PieceCoordinator {
         // Fallback: allow the excluded peer (retry rotation is best-effort).
         // Also relax min_peer_speed — a slow peer is better than no peer.
         // Still exclude permanently rejected peers — they will never serve us.
+        // Still exclude peers in timed exclusion — they need cool-off time.
         self.peers
             .iter()
             .enumerate()
@@ -614,6 +1228,7 @@ impl PieceCoordinator {
                     && !tracker
                         .get(*i)
                         .is_some_and(|s| s.should_avoid_permanently())
+                    && !tracker.get(*i).is_some_and(|s| s.is_excluded(now))
             })
             .max_by_key(|(i, p)| {
                 let score = tracker.composite_score(*i, now);
@@ -622,21 +1237,52 @@ impl PieceCoordinator {
             .map(|(idx, peer)| (idx, peer.as_ref()))
     }
 
-    /// Creates or truncates the output file, pre-allocating to the expected size.
-    fn prepare_output_file(path: &Path, file_size: u64) -> Result<std::fs::File, io::Error> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(path)?;
+    /// Attempts to load resume state from disk and restore the piece map.
+    ///
+    /// Returns `true` if pieces were successfully restored (the output file
+    /// should be opened without truncation). Returns `false` if no resume
+    /// path is configured, no file exists, the file is corrupt, or the
+    /// parameters don't match (fresh start with truncation).
+    fn try_load_resume(&self, on_progress: &mut (dyn FnMut(CoordinatorProgress) + Send)) -> bool {
+        let resume_path = match self.config.resume_path {
+            Some(ref p) => p,
+            None => return false,
+        };
 
-        // Pre-allocate the file to the expected size. This avoids fragmentation
-        // and ensures sufficient disk space before downloading begins.
-        file.set_len(file_size)?;
-        Ok(file)
+        let state = match ResumeState::load(resume_path) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+
+        // Reject resume state from a different torrent.
+        if state
+            .validate(self.info.piece_count(), self.info.file_size)
+            .is_err()
+        {
+            return false;
+        }
+
+        // Restore completed pieces into the piece map.
+        let mut pieces_resumed = 0u32;
+        let mut bytes_resumed = 0u64;
+        for i in 0..state.piece_count() {
+            if state.is_done(i) && self.piece_map.get(i) != PieceState::Done {
+                self.piece_map.mark_done(i);
+                pieces_resumed = pieces_resumed.saturating_add(1);
+                bytes_resumed = bytes_resumed.saturating_add(self.info.piece_size(i) as u64);
+            }
+        }
+
+        if pieces_resumed > 0 {
+            on_progress(CoordinatorProgress::Resumed {
+                pieces_resumed,
+                pieces_total: self.info.piece_count(),
+                bytes_resumed,
+            });
+            true
+        } else {
+            false
+        }
     }
 
     /// SHA-1 verifies a piece against the expected hash from torrent metadata.
@@ -664,6 +1310,117 @@ impl PieceCoordinator {
         }
 
         Ok(())
+    }
+}
+
+// ── Partition recovery (IRC netsplit pattern) ───────────────────────
+
+/// Tracks per-peer bitfield snapshots for netsplit-aware reconnection.
+///
+/// ## Why (IRC netsplit lesson)
+///
+/// When a peer disconnects and reconnects (analogous to an IRC netsplit/
+/// netburst), its piece availability may have changed. Blindly trusting
+/// cached state risks requesting pieces the peer no longer has (stale
+/// entries) or missing pieces the peer acquired while partitioned.
+///
+/// ## How
+///
+/// On disconnect, the `PartitionRecovery` saves the peer's last-known
+/// bitfield snapshot. On reconnect, the coordinator requests a fresh
+/// bitfield and calls [`reconcile`] to diff the two. The diff reveals:
+/// - **Gained pieces** — the peer acquired new pieces during the partition.
+/// - **Lost pieces** — pieces the peer no longer has (storage failure,
+///   pruning, or data corruption during the partition).
+///
+/// The coordinator uses this diff to update its piece availability map
+/// without trusting stale cached state.
+pub struct PartitionRecovery {
+    /// Saved bitfield snapshots, keyed by peer index.
+    ///
+    /// Only populated for peers that have disconnected. Removed after
+    /// successful reconciliation.
+    snapshots: std::collections::HashMap<usize, Vec<bool>>,
+}
+
+/// Result of reconciling a peer's pre-partition and post-reconnect bitfields.
+///
+/// The coordinator uses this to update piece availability without trusting
+/// stale cached state from before the partition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReconciliationDiff {
+    /// Piece indices the peer gained during the partition (not in old, in new).
+    pub gained: Vec<u32>,
+    /// Piece indices the peer lost during the partition (in old, not in new).
+    pub lost: Vec<u32>,
+}
+
+impl PartitionRecovery {
+    /// Creates an empty partition recovery tracker.
+    pub fn new() -> Self {
+        Self {
+            snapshots: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Saves a peer's bitfield snapshot on disconnect.
+    ///
+    /// Call this when a peer disconnects so that on reconnect the coordinator
+    /// can diff the old and new bitfields.
+    pub fn save_snapshot(&mut self, peer_index: usize, bitfield: Vec<bool>) {
+        self.snapshots.insert(peer_index, bitfield);
+    }
+
+    /// Removes a saved snapshot without reconciling (e.g. peer permanently gone).
+    pub fn discard(&mut self, peer_index: usize) {
+        self.snapshots.remove(&peer_index);
+    }
+
+    /// Returns `true` if a snapshot exists for the given peer (peer was partitioned).
+    pub fn has_snapshot(&self, peer_index: usize) -> bool {
+        self.snapshots.contains_key(&peer_index)
+    }
+
+    /// Reconciles a peer's pre-partition snapshot against a fresh bitfield
+    /// received on reconnect.
+    ///
+    /// Returns the diff (gained/lost pieces) and removes the saved snapshot.
+    /// Returns `None` if no snapshot was saved for this peer (peer was not
+    /// partitioned — treat as a fresh join).
+    pub fn reconcile(
+        &mut self,
+        peer_index: usize,
+        fresh_bitfield: &[bool],
+    ) -> Option<ReconciliationDiff> {
+        let old = self.snapshots.remove(&peer_index)?;
+
+        let max_len = old.len().max(fresh_bitfield.len());
+        let mut gained = Vec::new();
+        let mut lost = Vec::new();
+
+        for i in 0..max_len {
+            let was_available = old.get(i).copied().unwrap_or(false);
+            let now_available = fresh_bitfield.get(i).copied().unwrap_or(false);
+
+            if !was_available && now_available {
+                gained.push(i as u32);
+            } else if was_available && !now_available {
+                lost.push(i as u32);
+            }
+        }
+
+        Some(ReconciliationDiff { gained, lost })
+    }
+
+    /// Returns the number of peers with saved snapshots.
+    pub fn partitioned_count(&self) -> usize {
+        self.snapshots.len()
+    }
+}
+
+impl Default for PartitionRecovery {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -1513,5 +2270,308 @@ mod tests {
         };
         let msg = io_err.to_string();
         assert!(msg.contains("broken pipe"), "Io should show source: {msg}");
+    }
+
+    // ── PartitionRecovery (IRC netsplit pattern) ────────────────────
+
+    /// New PartitionRecovery starts with no snapshots.
+    #[test]
+    fn partition_recovery_starts_empty() {
+        let pr = PartitionRecovery::new();
+        assert_eq!(pr.partitioned_count(), 0);
+        assert!(!pr.has_snapshot(0));
+    }
+
+    /// Saving and reconciling a snapshot detects gained and lost pieces.
+    ///
+    /// When a peer disconnects with [true, false, true] and reconnects
+    /// with [true, true, false], piece 1 was gained and piece 2 was lost.
+    #[test]
+    fn partition_recovery_detects_gained_and_lost() {
+        let mut pr = PartitionRecovery::new();
+        pr.save_snapshot(0, vec![true, false, true, false]);
+        assert!(pr.has_snapshot(0));
+
+        let fresh = vec![true, true, false, false];
+        let diff = pr.reconcile(0, &fresh).unwrap();
+
+        assert_eq!(diff.gained, vec![1]);
+        assert_eq!(diff.lost, vec![2]);
+        // Snapshot is consumed after reconciliation.
+        assert!(!pr.has_snapshot(0));
+    }
+
+    /// Reconciling without a saved snapshot returns None (fresh join).
+    ///
+    /// If a peer connects for the first time (never disconnected), there
+    /// is no pre-partition state to diff against.
+    #[test]
+    fn partition_recovery_no_snapshot_returns_none() {
+        let mut pr = PartitionRecovery::new();
+        let result = pr.reconcile(5, &[true, false]);
+        assert!(result.is_none());
+    }
+
+    /// Discard removes a saved snapshot without reconciling.
+    #[test]
+    fn partition_recovery_discard() {
+        let mut pr = PartitionRecovery::new();
+        pr.save_snapshot(2, vec![true, true]);
+        assert_eq!(pr.partitioned_count(), 1);
+        pr.discard(2);
+        assert_eq!(pr.partitioned_count(), 0);
+        assert!(!pr.has_snapshot(2));
+    }
+
+    /// Reconciliation handles different-length bitfields.
+    ///
+    /// The fresh bitfield may be longer (peer now tracks more pieces) or
+    /// shorter (truncated). Missing entries are treated as `false`.
+    #[test]
+    fn partition_recovery_different_lengths() {
+        let mut pr = PartitionRecovery::new();
+        // Old: 3 pieces, New: 5 pieces (peer now has 2 extra).
+        pr.save_snapshot(0, vec![true, false, true]);
+        let fresh = vec![true, false, true, true, true];
+        let diff = pr.reconcile(0, &fresh).unwrap();
+        assert_eq!(diff.gained, vec![3, 4]);
+        assert!(diff.lost.is_empty());
+    }
+
+    /// Identical bitfields produce an empty diff.
+    #[test]
+    fn partition_recovery_no_change() {
+        let mut pr = PartitionRecovery::new();
+        pr.save_snapshot(0, vec![true, false, true]);
+        let diff = pr.reconcile(0, &[true, false, true]).unwrap();
+        assert!(diff.gained.is_empty());
+        assert!(diff.lost.is_empty());
+    }
+
+    /// Default trait implementation works.
+    #[test]
+    fn partition_recovery_default() {
+        let pr = PartitionRecovery::default();
+        assert_eq!(pr.partitioned_count(), 0);
+    }
+
+    // ── DownloadMode ────────────────────────────────────────────────
+
+    /// Bulk mode downloads all pieces using sequential piece selection.
+    ///
+    /// Validates that the default `DownloadMode::Bulk` path produces a
+    /// correct output file. This is the zero-overhead fast path for web
+    /// seeds.
+    #[test]
+    fn bulk_mode_downloads_all_pieces() {
+        let piece_a = vec![0xAA; 256];
+        let piece_b = vec![0xBB; 128];
+        let info = make_torrent_info(&[&piece_a, &piece_b]);
+
+        let config = CoordinatorConfig {
+            download_mode: DownloadMode::Bulk,
+            ..CoordinatorConfig::default()
+        };
+
+        let mut coord = PieceCoordinator::new(info, config);
+        coord.add_peer(Box::new(MockPeer::web_seed(vec![
+            piece_a.clone(),
+            piece_b.clone(),
+        ])));
+
+        let tmp = std::env::temp_dir().join("p2p-bulk-mode-test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let out = tmp.join("bulk.bin");
+
+        let result = coord.run(&out, &mut |_| {});
+        assert!(result.is_ok(), "bulk mode failed: {:?}", result);
+
+        let data = std::fs::read(&out).unwrap();
+        let mut expected = piece_a;
+        expected.extend_from_slice(&piece_b);
+        assert_eq!(data, expected);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Streaming mode uses priority-weighted piece selection and notifies
+    /// the `StreamNotifier` after each completed piece.
+    ///
+    /// Validates that `DownloadMode::Streaming` correctly integrates the
+    /// `PiecePriorityMap` and `StreamNotifier` from `reader.rs`, and that
+    /// completed pieces produce byte-range notifications.
+    #[test]
+    fn streaming_mode_downloads_and_notifies() {
+        use crate::priority::PiecePriorityMap;
+        use crate::reader::StreamingReader;
+        use crate::streaming::{BufferPolicy, ByteRangeMap};
+
+        let piece_a = vec![0xAA; 256];
+        let piece_b = vec![0xBB; 128];
+        let info = make_torrent_info(&[&piece_a, &piece_b]);
+
+        let tmp = std::env::temp_dir().join("p2p-streaming-mode-test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        // Create the output file for the coordinator.
+        let out = tmp.join("streaming.bin");
+
+        // Create a backing file for StreamingReader (needs to exist for open).
+        let reader_file = tmp.join("reader.bin");
+        std::fs::write(&reader_file, [0u8; 384]).unwrap();
+
+        let (_reader, notifier) = StreamingReader::new_streaming(
+            &reader_file,
+            ByteRangeMap::new(384),
+            BufferPolicy::default(),
+        )
+        .unwrap();
+
+        // Priority map: piece 1 is Critical, piece 0 stays Normal.
+        let now = Instant::now();
+        let mut pm = PiecePriorityMap::new(2, now);
+        pm.update(&[1], &[], &[], now);
+        let priority_map = Arc::new(Mutex::new(pm));
+
+        let config = CoordinatorConfig {
+            download_mode: DownloadMode::Streaming {
+                priority_map: Arc::clone(&priority_map),
+                notifier,
+            },
+            ..CoordinatorConfig::default()
+        };
+
+        let mut coord = PieceCoordinator::new(info, config);
+        coord.add_peer(Box::new(MockPeer::web_seed(vec![
+            piece_a.clone(),
+            piece_b.clone(),
+        ])));
+
+        let mut completed_pieces = Vec::new();
+        let result = coord.run(&out, &mut |ev| {
+            if let CoordinatorProgress::PieceComplete { piece_index, .. } = ev {
+                completed_pieces.push(piece_index);
+            }
+        });
+        assert!(result.is_ok(), "streaming mode failed: {:?}", result);
+
+        // Verify all pieces downloaded.
+        let data = std::fs::read(&out).unwrap();
+        let mut expected = piece_a;
+        expected.extend_from_slice(&piece_b);
+        assert_eq!(data, expected);
+
+        // Both pieces must have been completed.
+        assert_eq!(completed_pieces.len(), 2);
+        assert!(completed_pieces.contains(&0));
+        assert!(completed_pieces.contains(&1));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Streaming mode with a single peer prioritises the Critical piece.
+    ///
+    /// With concurrency=1, piece selection is deterministic: the Critical
+    /// piece (index 1) must be selected before the Normal piece (index 0).
+    /// This validates that `select_next_piece()` is actually wired into
+    /// the coordinator for Streaming mode.
+    #[test]
+    fn streaming_mode_respects_priority_order() {
+        use crate::priority::PiecePriorityMap;
+        use crate::reader::StreamingReader;
+        use crate::streaming::{BufferPolicy, ByteRangeMap};
+
+        let piece_a = vec![0xAA; 256];
+        let piece_b = vec![0xBB; 256];
+        let info = make_torrent_info(&[&piece_a, &piece_b]);
+
+        let tmp = std::env::temp_dir().join("p2p-streaming-priority-test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let out = tmp.join("priority.bin");
+
+        let reader_file = tmp.join("reader.bin");
+        std::fs::write(&reader_file, [0u8; 512]).unwrap();
+
+        let (_reader, notifier) = StreamingReader::new_streaming(
+            &reader_file,
+            ByteRangeMap::new(512),
+            BufferPolicy::default(),
+        )
+        .unwrap();
+
+        // Priority map: piece 1 is Critical, piece 0 stays Normal.
+        // Critical weight (1000) always beats Normal (200) in the
+        // additive two-tier scoring formula.
+        let now = Instant::now();
+        let mut pm = PiecePriorityMap::new(2, now);
+        pm.update(&[1], &[], &[], now);
+        let priority_map = Arc::new(Mutex::new(pm));
+
+        let config = CoordinatorConfig {
+            // Single worker ensures deterministic ordering.
+            max_concurrent_pieces: 1,
+            download_mode: DownloadMode::Streaming {
+                priority_map: Arc::clone(&priority_map),
+                notifier,
+            },
+            ..CoordinatorConfig::default()
+        };
+
+        let mut coord = PieceCoordinator::new(info, config);
+        coord.add_peer(Box::new(MockPeer::web_seed(vec![
+            piece_a.clone(),
+            piece_b.clone(),
+        ])));
+
+        let mut order = Vec::new();
+        let result = coord.run(&out, &mut |ev| {
+            if let CoordinatorProgress::PieceComplete { piece_index, .. } = ev {
+                order.push(piece_index);
+            }
+        });
+        assert!(result.is_ok(), "streaming priority failed: {:?}", result);
+
+        // Critical piece 1 must be downloaded before Low piece 0.
+        assert_eq!(order, vec![1, 0], "expected Critical piece first");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// DownloadMode default is Bulk.
+    ///
+    /// Ensures the zero-overhead path is the default for callers that don't
+    /// specify a mode.
+    #[test]
+    fn download_mode_default_is_bulk() {
+        assert!(matches!(DownloadMode::default(), DownloadMode::Bulk));
+    }
+
+    /// DownloadMode Debug formatting.
+    ///
+    /// Streaming variant must not attempt to format the inner Mutex/Arc
+    /// fields — it should print a placeholder.
+    #[test]
+    fn download_mode_debug_formatting() {
+        let bulk_debug = format!("{:?}", DownloadMode::Bulk);
+        assert_eq!(bulk_debug, "Bulk");
+    }
+
+    /// CoordinatorConfig Debug includes download_mode field.
+    #[test]
+    fn coordinator_config_debug_includes_download_mode() {
+        let config = CoordinatorConfig::default();
+        let debug = format!("{:?}", config);
+        assert!(
+            debug.contains("download_mode"),
+            "Debug output must include download_mode field"
+        );
+        assert!(
+            debug.contains("Bulk"),
+            "Default mode should be Bulk in debug output"
+        );
     }
 }

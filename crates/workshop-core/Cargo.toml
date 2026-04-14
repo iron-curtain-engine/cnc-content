@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[package]
+name = "workshop-core"
+version = "0.1.0-alpha.0"
+edition = "2021"
+rust-version = "1.89"
+description = "Engine-agnostic Workshop package registry and content distribution"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/iron-curtain-engine/workshop-core"
+authors = ["Iron Curtain contributors"]
+keywords = ["workshop", "modding", "registry", "p2p", "gamedev"]
+categories = ["games", "network-programming"]
+
+[dependencies]
+sha2 = "0.11"
+thiserror = "2.0"

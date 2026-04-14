@@ -14,13 +14,15 @@
 //! 2. **Closed content set** — the P2P engine is hardcoded to distribute
 //!    *only* the packages listed in this file. It cannot be repurposed as a
 //!    general-purpose BitTorrent client. Only EA-declared freeware (Red Alert
-//!    since 2008, Tiberian Dawn since 2007) has download entries.
+//!    since 2008, Tiberian Dawn since 2007, Tiberian Sun since 2010) has
+//!    download entries.
 //!
 //! ## Legal basis
 //!
 //! - **Red Alert**: EA-declared freeware (2008-08-31)
 //! - **Tiberian Dawn**: EA-declared freeware (2007-08-31), GPL-3.0 source (2025-02)
-//! - **No other games** have download packages — Dune 2, Dune 2000, TS, RA2,
+//! - **Tiberian Sun**: EA-declared freeware (2010), includes Firestorm expansion
+//! - **No other games** have download packages — Dune 2, Dune 2000, RA2,
 //!   and Generals are local-source-only.
 
 use std::sync::LazyLock;
@@ -81,6 +83,37 @@ pub fn all_downloads() -> &'static [DownloadPackage] {
 //   cnc-content torrent-create --output data/torrents
 //   cp data/torrents/*.torrent docs/torrents/  # for GitHub Pages
 
+// ── Compiled mirror cache ──────────────────────────────────────────
+//
+// Mirror URLs are stored directly in `data/downloads.toml` in the
+// `mirrors` array of each `[[download]]` entry. A GitHub Action
+// (`update-mirrors.yml`) periodically fetches every non-empty
+// `mirror_list_url` and updates the `mirrors` array in-place.
+// IoC validation runs against ALL project domains before any PR is
+// created.
+//
+// These provide a compile-time baseline of known-good mirrors that
+// works even if the runtime mirror list fetch fails or is blocked.
+// The runtime fetch supplements these with any mirrors added between
+// releases.
+
+/// Returns the compile-time cached mirror list for a download package.
+///
+/// Returns `None` if no mirrors are cached (e.g. IC-hosted packages
+/// whose infrastructure is not yet live, or packages that use
+/// `direct_urls` only).
+///
+/// Mirror URLs live in the `mirrors` array of each `[[download]]`
+/// entry in `data/downloads.toml` — the single source of truth.
+pub fn compiled_mirrors(id: DownloadId) -> Option<&'static [String]> {
+    let dl = all_downloads().iter().find(|d| d.id == id)?;
+    if dl.mirrors.is_empty() {
+        None
+    } else {
+        Some(&dl.mirrors)
+    }
+}
+
 /// Returns the embedded `.torrent` file bytes for a download package, or
 /// `None` if no `.torrent` has been generated yet (e.g. IC-hosted packages
 /// whose mirror infrastructure is not yet live).
@@ -111,8 +144,8 @@ pub fn embedded_torrent(id: DownloadId) -> Option<&'static [u8]> {
         DownloadId::RaFullDiscs | DownloadId::RaFullSet => None,
 
         // ── IC-hosted packages (not yet seeded) ──────────────────────
-        // Mirror lists return 404 until content-bootstrap repo is
-        // populated. No .torrent until we have the actual ZIPs.
+        // These DownloadIds exist as enum variants for future packages.
+        // No .torrent until content ZIPs are built and mirrors go live.
         DownloadId::RaMusic
         | DownloadId::RaMoviesAllied
         | DownloadId::RaMoviesSoviet
@@ -120,6 +153,17 @@ pub fn embedded_torrent(id: DownloadId) -> Option<&'static [u8]> {
         | DownloadId::RaMusicAftermath
         | DownloadId::TdMusic
         | DownloadId::TdMoviesGdi
-        | DownloadId::TdMoviesNod => None,
+        | DownloadId::TdMoviesNod
+        | DownloadId::TsMusic
+        | DownloadId::TsMovies => None,
+
+        // ── TS OpenRA mirror packages ────────────────────────────────
+        // No .torrent yet — SHA-1 not confirmed for these packages.
+        DownloadId::TsBaseFiles | DownloadId::TsQuickInstall | DownloadId::TsExpand => None,
+
+        // ── TS disc ISOs (cnc-comm.com) ──────────────────────────────
+        // No .torrent yet — will be generated after downloading and
+        // hashing the ZIPs via `cnc-content torrent-create`.
+        DownloadId::TsGdiIso | DownloadId::TsNodIso | DownloadId::TsFirestormIso => None,
     }
 }

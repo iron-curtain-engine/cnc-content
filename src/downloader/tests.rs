@@ -188,6 +188,42 @@ fn extract_zip_rejects_mixed_valid_and_malicious() {
     let _ = fs::remove_dir_all(&tmp);
 }
 
+/// Verifies that a ZIP entry with embedded parent traversal
+/// (`subdir/../../etc/passwd`) is rejected.
+///
+/// Naive path checks that only inspect the first component would miss
+/// traversal sequences buried deeper in the path. `strict-path` validates
+/// the full normalized path, catching `subdir/../../etc/passwd` which
+/// resolves to `../etc/passwd` — outside the boundary.
+#[test]
+fn extract_zip_rejects_embedded_traversal() {
+    let tmp = std::env::temp_dir().join("cnc-zip-slip-embedded");
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(&tmp).unwrap();
+
+    let zip_path = tmp.join("embedded.zip");
+    create_test_zip(&zip_path, &[("subdir/../../etc/passwd", b"pwned")]);
+
+    let content_root = tmp.join("content");
+    fs::create_dir_all(&content_root).unwrap();
+
+    let result = extract_zip(&zip_path, &content_root, &mut noop_progress);
+    assert!(result.is_err(), "should reject embedded traversal attack");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("blocked path traversal") || err.contains("Escapes"),
+        "error should mention traversal: {err}"
+    );
+
+    // The escaped file must NOT exist.
+    assert!(
+        !tmp.join("etc/passwd").exists(),
+        "traversal payload must not be written"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
 // ── DownloadError::NotFreeware ───────────────────────────────────
 
 /// Verifies that `download_missing` rejects non-freeware games immediately
@@ -198,7 +234,12 @@ fn download_missing_rejects_non_freeware() {
     let _ = fs::remove_dir_all(&tmp);
     fs::create_dir_all(&tmp).unwrap();
 
-    let result = download_missing(&tmp, GameId::Dune2, &mut noop_progress);
+    let result = download_missing(
+        &tmp,
+        GameId::Dune2,
+        SeedingPolicy::ExtractAndDelete,
+        &mut noop_progress,
+    );
     assert!(result.is_err(), "Dune2 is not freeware, should be rejected");
 
     let err = result.unwrap_err();
@@ -724,19 +765,22 @@ fn resolve_urls_none_mirrors_and_no_direct_returns_empty() {
 ///
 /// The test constructs a minimal `DownloadPackage` with all URL fields empty so
 /// no HTTP request is attempted, making this an offline, deterministic assertion.
+/// Uses an IC-hosted download ID that has no compiled mirrors, ensuring the
+/// compiled-mirror path does not inject URLs.
 #[test]
 fn download_package_no_urls_returns_error() {
     let pkg = DownloadPackage {
-        id: DownloadId::RaQuickInstall,
+        id: DownloadId::RaMoviesAllied,
         game: GameId::RedAlert,
         title: "Test Package".to_string(),
-        mirror_list_url: String::new(),
+        mirror_list_url: None,
+        mirrors: vec![],
         direct_urls: vec![],
-        sha1: "0000000000000000000000000000000000000000".to_string(),
-        info_hash: String::new(),
+        sha1: None,
+        info_hash: None,
         trackers: vec![],
         web_seeds: vec![],
-        provides: vec![crate::PackageId::RaBase],
+        provides: vec![crate::PackageId::RaMoviesAllied],
         format: "zip".to_string(),
         size_hint: 0,
     };
@@ -786,9 +830,14 @@ fn download_missing_already_complete_is_noop() {
 
     // Should return Ok(()) immediately without any HTTP calls.
     let mut progress_called = false;
-    download_missing(&tmp, GameId::RedAlert, &mut |_| {
-        progress_called = true;
-    })
+    download_missing(
+        &tmp,
+        GameId::RedAlert,
+        SeedingPolicy::ExtractAndDelete,
+        &mut |_| {
+            progress_called = true;
+        },
+    )
     .expect("download_missing should succeed when content is complete");
     assert!(
         !progress_called,
@@ -807,15 +856,17 @@ fn download_missing_already_complete_is_noop() {
 /// gated out at compile time. `select_strategy` must fall back to `Http` in that
 /// case so the download still proceeds via HTTP mirrors.
 #[test]
+#[cfg(not(feature = "torrent"))]
 fn select_strategy_http_for_no_torrent_feature() {
     let pkg = DownloadPackage {
         id: DownloadId::RaQuickInstall,
         game: GameId::RedAlert,
         title: "Test".to_string(),
-        mirror_list_url: String::new(),
+        mirror_list_url: None,
+        mirrors: vec![],
         direct_urls: vec![],
-        sha1: "0000000000000000000000000000000000000000".to_string(),
-        info_hash: "abcdef1234567890abcdef1234567890abcdef12".to_string(),
+        sha1: None,
+        info_hash: Some("abcdef1234567890abcdef1234567890abcdef12".to_string()),
         trackers: vec![],
         web_seeds: vec![],
         provides: vec![],
@@ -824,4 +875,115 @@ fn select_strategy_http_for_no_torrent_feature() {
     };
     // Even with an info_hash, without the torrent feature it should be Http.
     assert_eq!(select_strategy(&pkg), DownloadStrategy::Http);
+}
+
+// ── Security: download pre-allocation cap (CWE-400 / CWE-409) ──
+
+/// The MAX_PREALLOC_SIZE constant is reasonable for known C&C content.
+///
+/// The largest downloadable packages are ~700 MB disc ISOs. The pre-allocation
+/// cap must be large enough for any real content while preventing a spoofed
+/// Content-Length header from allocating unbounded disk space (sparse file DoS).
+#[test]
+fn max_prealloc_size_is_sane() {
+    use super::mirror::MAX_PREALLOC_SIZE;
+    const {
+        // Must fit the largest C&C disc ISOs (~700 MB).
+        assert!(
+            MAX_PREALLOC_SIZE >= 700_000_000,
+            "pre-alloc cap must fit disc ISOs"
+        );
+        // Must not allow unbounded allocation (cap at a few GB).
+        assert!(
+            MAX_PREALLOC_SIZE <= 4 * 1024 * 1024 * 1024,
+            "pre-alloc cap should prevent excessive allocation"
+        );
+    }
+}
+
+// ── Security: redirect limit (SSRF mitigation) ─────────────────
+
+/// The MAX_REDIRECTS constant is reasonable for CDN content delivery.
+///
+/// CDN redirects (e.g. GitHub Releases → objects.githubusercontent.com)
+/// typically need only 1–2 hops. Limiting to 5 prevents redirect-chain
+/// attacks while allowing legitimate CDN routing.
+#[test]
+fn max_redirects_is_sane() {
+    use super::mirror::MAX_REDIRECTS;
+    const {
+        // Must allow CDN redirects (GitHub uses 1–2).
+        assert!(
+            MAX_REDIRECTS >= 2,
+            "redirect limit must allow CDN redirects"
+        );
+        // Must prevent long redirect chains (default ureq is 10).
+        assert!(
+            MAX_REDIRECTS <= 8,
+            "redirect limit should prevent chain attacks"
+        );
+    }
+}
+
+// ── IPv6 SSRF denylist tests ─────────────────────────────────────────
+
+/// IPv6 loopback `[::1]` must be rejected (with and without port).
+///
+/// Without this check, an attacker could bypass the IPv4 `127.0.0.1`
+/// denylist by using the equivalent IPv6 loopback address.
+#[test]
+fn rejects_ipv6_loopback() {
+    use super::mirror::is_safe_mirror_url;
+    assert!(!is_safe_mirror_url("https://[::1]/file.zip"));
+    assert!(!is_safe_mirror_url("https://[::1]:8080/file.zip"));
+}
+
+/// IPv4-mapped IPv6 addresses (`::ffff:127.0.0.1`, `::ffff:10.x.x.x`)
+/// must be rejected to prevent IPv4 denylist bypass.
+///
+/// An attacker who controls a mirror list entry can use IPv4-mapped IPv6
+/// notation to reference private IPv4 addresses while evading a check
+/// that only inspects the dotted-decimal form.
+#[test]
+fn rejects_ipv4_mapped_ipv6_private() {
+    use super::mirror::is_safe_mirror_url;
+    // Loopback via IPv4-mapped
+    assert!(!is_safe_mirror_url("https://[::ffff:127.0.0.1]/file.zip"));
+    // 10.0.0.0/8 via IPv4-mapped
+    assert!(!is_safe_mirror_url("https://[::ffff:10.0.0.1]/file.zip"));
+    // 192.168.0.0/16 via IPv4-mapped
+    assert!(!is_safe_mirror_url("https://[::ffff:192.168.1.1]/file.zip"));
+    // 172.16.0.0/12 via IPv4-mapped
+    assert!(!is_safe_mirror_url("https://[::ffff:172.16.0.1]/file.zip"));
+    // 169.254.0.0/16 (link-local) via IPv4-mapped
+    assert!(!is_safe_mirror_url("https://[::ffff:169.254.1.1]/file.zip"));
+}
+
+/// IPv6 link-local (`fe80::/10`) and ULA (`fc00::/7`) addresses must be
+/// rejected.
+///
+/// These are IPv6-native private ranges analogous to RFC 1918. A
+/// compromised mirror list could use them for SSRF against IPv6 services
+/// on the local network.
+#[test]
+fn rejects_ipv6_link_local_and_ula() {
+    use super::mirror::is_safe_mirror_url;
+    // Link-local
+    assert!(!is_safe_mirror_url("https://[fe80::1%25eth0]/file.zip"));
+    // ULA fd00::/8
+    assert!(!is_safe_mirror_url("https://[fd12:3456::1]/file.zip"));
+    // ULA fc00::/8
+    assert!(!is_safe_mirror_url("https://[fc00::1]/file.zip"));
+}
+
+/// Public IPv6 addresses should still be accepted.
+///
+/// Ensures the IPv6 denylist does not over-block legitimate global
+/// unicast addresses (2000::/3).
+#[test]
+fn accepts_public_ipv6() {
+    use super::mirror::is_safe_mirror_url;
+    assert!(is_safe_mirror_url(
+        "https://[2607:f8b0:4004:800::200e]/file.zip"
+    ));
 }

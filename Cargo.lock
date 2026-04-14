@@ -104,6 +104,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrayref"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb"
+
+[[package]]
+name = "arrayvec"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+
+[[package]]
 name = "assert_cfg"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -231,6 +243,21 @@ dependencies = [
  "radium",
  "tap",
  "wyz",
+]
+
+[[package]]
+name = "blake3"
+version = "1.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d2d5991425dfd0785aed03aedcf0b321d61975c9b5b3689c774a2610ae0b51e"
+dependencies = [
+ "arrayref",
+ "arrayvec",
+ "cc",
+ "cfg-if",
+ "constant_time_eq",
+ "cpufeatures",
+ "rayon-core",
 ]
 
 [[package]]
@@ -372,6 +399,7 @@ name = "cnc-content"
 version = "0.1.0-alpha.0"
 dependencies = [
  "app-path",
+ "blake3",
  "clap",
  "cnc-formats",
  "console",
@@ -383,7 +411,6 @@ dependencies = [
  "rayon",
  "serde",
  "sha1",
- "sha2",
  "strict-path",
  "thiserror 2.0.18",
  "tokio",
@@ -398,7 +425,6 @@ dependencies = [
 [[package]]
 name = "cnc-formats"
 version = "0.1.0-alpha.5"
-source = "git+https://github.com/iron-curtain-engine/cnc-formats.git#a6aa76690eece1b635d892cfe5538c2f60bf27a5"
 dependencies = [
  "base64",
  "blowfish",
@@ -471,6 +497,12 @@ checksum = "e262cdaac42494e3ae34c43969f9cdeb7da178bdb4b66fa6a1ea2edb4c8ae652"
 dependencies = [
  "typewit",
 ]
+
+[[package]]
+name = "constant_time_eq"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
 name = "core-foundation"
@@ -1870,6 +1902,7 @@ dependencies = [
  "getrandom 0.2.17",
  "sha1",
  "sha2",
+ "tempfile",
  "thiserror 2.0.18",
  "ureq",
 ]
@@ -3537,6 +3570,48 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser",
+]
+
+[[package]]
+name = "workshop-core"
+version = "0.1.0-alpha.0"
+dependencies = [
+ "sha2",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "workshop-package"
+version = "0.1.0-alpha.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+ "workshop-core",
+ "zip",
+]
+
+[[package]]
+name = "workshop-registry"
+version = "0.1.0-alpha.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "workshop-core",
+]
+
+[[package]]
+name = "workshop-resolver"
+version = "0.1.0-alpha.0"
+dependencies = [
+ "semver",
+ "serde",
+ "thiserror 2.0.18",
+ "toml",
+ "workshop-core",
+ "workshop-registry",
 ]
 
 [[package]]

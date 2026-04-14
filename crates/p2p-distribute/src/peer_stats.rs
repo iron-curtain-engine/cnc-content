@@ -68,6 +68,23 @@ const BASE_BACKOFF_SECS: u64 = 5;
 /// Maximum backoff cap — stops growing after this (5→10→20→40→60 seconds).
 const MAX_BACKOFF_SECS: u64 = 60;
 
+/// Base exclusion duration for corruption-based timed exclusion (aMule
+/// DeadSourceList pattern). First corruption: 15 minutes. Doubles on each
+/// subsequent corruption, capped at [`MAX_EXCLUSION_SECS`].
+const BASE_EXCLUSION_SECS: u64 = 900;
+
+/// Maximum exclusion cap — stops growing after 1 hour.
+const MAX_EXCLUSION_SECS: u64 = 3600;
+
+/// Number of independent corroborations (from different peers) required
+/// before a Local exclusion escalates to Shared scope (IRC G-line requires
+/// 3 operators to agree).
+const SHARED_ESCALATION_THRESHOLD: u32 = 3;
+
+/// Number of independent corroborations required before escalating to
+/// Subnet scope (IRC Z-line — multiple offenders from the same range).
+const SUBNET_ESCALATION_THRESHOLD: u32 = 5;
+
 /// EWMA smoothing factor for speed tracking, matching `WebSeedPeer` (α=0.3).
 /// Higher α gives more weight to recent speed observations.
 const EWMA_ALPHA: f64 = 0.3;
@@ -77,6 +94,17 @@ const ESTABLISHED_THRESHOLD: u32 = 3;
 
 /// Pieces a peer must serve before reaching [`TrustLevel::Trusted`].
 const TRUSTED_THRESHOLD: u32 = 10;
+
+/// Consecutive successfully-verified full pieces a paroled peer must
+/// deliver before being promoted back to normal status.
+///
+/// Informed by libtorrent's parole mode: when a piece fails hash check
+/// and multiple peers contributed to it, all contributing peers enter
+/// parole. In parole, each peer is assigned *only whole pieces* (no
+/// sharing a piece across peers). If that piece passes verification,
+/// the peer is cleared. If it fails, the peer is identified as the
+/// source of corruption with certainty.
+const PAROLE_REQUIRED_SUCCESSES: u32 = 1;
 
 /// Anti-snubbing threshold in seconds. If no data received from a peer
 /// for this duration while a download is active, the peer is considered
@@ -90,6 +118,131 @@ const TRUSTED_THRESHOLD: u32 = 10;
 /// to compensate. For our download-only use case, snubbed peers are
 /// skipped during piece assignment.
 const SNUB_TIMEOUT_SECS: u64 = 60;
+
+// ── ExclusionScope ──────────────────────────────────────────────────
+
+/// Tiered exclusion scope — IRC K-line / G-line / Z-line pattern.
+///
+/// IRC servers use different exclusion scopes depending on the severity
+/// and scope of the offense:
+///
+/// - **K-line** (local) — a single server bans a user. Only affects
+///   connections to that server. Other servers on the network are unaware.
+/// - **G-line** (global/shared) — multiple operators across servers
+///   agree to ban a user network-wide. Requires quorum (typically 3
+///   operators) to prevent abuse.
+/// - **Z-line** (subnet) — bans an entire IP range (CIDR) when multiple
+///   abusive connections originate from the same subnet.
+///
+/// Applied to P2P: a peer that serves corrupt data may be excluded
+/// locally (this coordinator only), shared with trusted peers via PEX
+/// reputation gossip, or escalated to subnet-level if multiple peers
+/// from the same `/24` are corrupt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExclusionScope {
+    /// Local exclusion — only this coordinator avoids the peer.
+    /// Equivalent to IRC K-line: one server's local ban.
+    Local,
+    /// Shared exclusion — propagated to trusted peers via PEX reputation.
+    /// Equivalent to IRC G-line: requires multi-peer corroboration.
+    /// The `corroborations` field in [`ExclusionEntry`] tracks how many
+    /// independent sources have confirmed the bad behavior.
+    Shared,
+    /// Subnet exclusion — blocks the peer's /24 subnet.
+    /// Equivalent to IRC Z-line: multiple offenders from the same range
+    /// indicate a compromised network segment.
+    Subnet,
+}
+
+// ── ExclusionEntry ──────────────────────────────────────────────────
+
+/// Timed exclusion state for a peer — aMule DeadSourceList pattern
+/// with IRC-style tiered scoping.
+///
+/// Instead of permanently blacklisting a peer after N corruption events,
+/// peers are temporarily excluded with exponential backoff. This gives
+/// peers a chance to recover (e.g. a mirror that served stale cache but
+/// has since refreshed). The exclusion doubles with each repeated offense:
+/// 15min → 30min → 60min (capped).
+///
+/// ## aMule DeadSourceList lesson
+///
+/// aMule's DeadSourceList removes sources temporarily rather than permanently.
+/// After a cool-off period, the source is retried. If it fails again, the
+/// next exclusion is longer. This prevents permanently losing a source that
+/// had a transient issue while still protecting against chronic bad actors.
+///
+/// ## IRC K-line / G-line / Z-line lesson
+///
+/// The [`scope`](Self::scope) field determines how widely the exclusion
+/// is applied: local-only (K-line), shared with trusted peers (G-line),
+/// or entire subnet (Z-line). Scope escalation happens based on
+/// corroboration count and repeated offenses.
+#[derive(Debug, Clone)]
+pub struct ExclusionEntry {
+    /// Time at which the exclusion expires and the peer can be retried.
+    pub excluded_until: Instant,
+    /// Number of times this peer has been excluded (drives backoff growth).
+    pub exclusion_count: u32,
+    /// Current backoff duration (for diagnostics and reporting).
+    pub backoff: Duration,
+    /// How widely the exclusion is applied (IRC K/G/Z-line pattern).
+    pub scope: ExclusionScope,
+    /// Number of independent peers that have corroborated the bad behavior.
+    /// When this reaches [`SHARED_ESCALATION_THRESHOLD`], the scope
+    /// escalates from Local to Shared. When it reaches
+    /// [`SUBNET_ESCALATION_THRESHOLD`], it escalates to Subnet.
+    pub corroborations: u32,
+}
+
+impl ExclusionEntry {
+    /// Creates a new exclusion entry starting now with the given backoff.
+    ///
+    /// New exclusions always start as [`ExclusionScope::Local`] (K-line).
+    /// Scope escalation happens through [`add_corroboration`](Self::add_corroboration).
+    fn new(now: Instant, backoff: Duration) -> Self {
+        Self {
+            excluded_until: now.checked_add(backoff).unwrap_or(now),
+            exclusion_count: 1,
+            backoff,
+            scope: ExclusionScope::Local,
+            corroborations: 0,
+        }
+    }
+
+    /// Extends the exclusion with doubled backoff (capped at MAX_EXCLUSION_SECS).
+    fn extend(&mut self, now: Instant) {
+        self.exclusion_count = self.exclusion_count.saturating_add(1);
+        let new_secs = self
+            .backoff
+            .as_secs()
+            .saturating_mul(2)
+            .min(MAX_EXCLUSION_SECS);
+        self.backoff = Duration::from_secs(new_secs);
+        self.excluded_until = now.checked_add(self.backoff).unwrap_or(now);
+    }
+
+    /// Whether the exclusion is still active.
+    pub fn is_active(&self, now: Instant) -> bool {
+        now < self.excluded_until
+    }
+
+    /// Adds a corroboration from an independent source and potentially
+    /// escalates the exclusion scope.
+    ///
+    /// ## IRC G-line / Z-line escalation
+    ///
+    /// - 3+ corroborations → Shared (G-line: multi-operator agreement)
+    /// - 5+ corroborations → Subnet (Z-line: network-segment ban)
+    pub fn add_corroboration(&mut self) {
+        self.corroborations = self.corroborations.saturating_add(1);
+        if self.corroborations >= SUBNET_ESCALATION_THRESHOLD {
+            self.scope = ExclusionScope::Subnet;
+        } else if self.corroborations >= SHARED_ESCALATION_THRESHOLD {
+            self.scope = ExclusionScope::Shared;
+        }
+    }
+}
 
 // ── TrustLevel ──────────────────────────────────────────────────────
 
@@ -225,6 +378,31 @@ pub struct PeerStats {
     /// Exponential weighted moving average speed in bytes/sec.
     /// More responsive than cumulative average. α=0.3 matching `WebSeedPeer`.
     pub ewma_speed: f64,
+    /// Whether this peer is currently in parole mode.
+    ///
+    /// ## Parole mode (libtorrent pattern)
+    ///
+    /// When a piece fails SHA-1 verification, we don't always know which
+    /// peer served the corrupt data (if multiple peers contributed blocks).
+    /// The coordinator puts all suspect peers in parole: they are only
+    /// assigned *whole pieces* (one peer per piece) so that the next
+    /// verification identifies the bad actor with certainty.
+    ///
+    /// A peer leaves parole after delivering `PAROLE_REQUIRED_SUCCESSES`
+    /// consecutive verified whole pieces. If a whole piece from a paroled
+    /// peer fails verification, that peer is definitively corrupt.
+    pub in_parole: bool,
+    /// Consecutive successfully verified whole pieces during parole.
+    /// Reset to 0 when entering parole. When this reaches
+    /// `PAROLE_REQUIRED_SUCCESSES`, parole ends.
+    pub parole_successes: u32,
+    /// Timed exclusion state (aMule DeadSourceList pattern).
+    ///
+    /// When a peer serves corrupt data, instead of a permanent blacklist it
+    /// receives a timed exclusion with exponential backoff: 15min → 30min →
+    /// 60min (capped). After the cool-off expires, the peer is retried.
+    /// `None` = not excluded.
+    pub exclusion: Option<ExclusionEntry>,
 }
 
 impl PeerStats {
@@ -246,6 +424,9 @@ impl PeerStats {
             first_seen: now,
             consecutive_transient_rejections: 0,
             ewma_speed: 0.0,
+            in_parole: false,
+            parole_successes: 0,
+            exclusion: None,
         }
     }
 
@@ -535,6 +716,90 @@ impl PeerStats {
     /// been rejected at least once (proving it exists and was contacted).
     pub fn has_interacted(&self) -> bool {
         self.pieces_requested > 0 || self.rejection_count > 0
+    }
+
+    /// Places this peer into parole mode.
+    ///
+    /// ## Parole mode (libtorrent pattern)
+    ///
+    /// When a piece fails SHA-1 verification and multiple peers contributed
+    /// to it, we can't identify which peer served the corrupt data. Parole
+    /// solves this: each suspect peer is assigned only whole pieces (one
+    /// peer per piece) so verification can pinpoint the bad actor.
+    ///
+    /// A peer remains in parole until it delivers `PAROLE_REQUIRED_SUCCESSES`
+    /// consecutive verified whole pieces.
+    pub fn enter_parole(&mut self) {
+        self.in_parole = true;
+        self.parole_successes = 0;
+    }
+
+    /// Records a successful whole-piece verification during parole.
+    ///
+    /// If the peer has delivered enough consecutive verified pieces, parole
+    /// ends and the peer returns to normal operation. Returns `true` if
+    /// parole ended with this call.
+    pub fn record_parole_success(&mut self) -> bool {
+        if !self.in_parole {
+            return false;
+        }
+        self.parole_successes = self.parole_successes.saturating_add(1);
+        if self.parole_successes >= PAROLE_REQUIRED_SUCCESSES {
+            self.in_parole = false;
+            self.parole_successes = 0;
+            return true;
+        }
+        false
+    }
+
+    /// Records a piece verification failure during parole — the peer is
+    /// definitively corrupt.
+    ///
+    /// When a paroled peer delivers a whole piece that fails SHA-1
+    /// verification, there's no ambiguity: this specific peer is the source
+    /// of corruption. The coordinator should escalate to blacklisting.
+    pub fn record_parole_failure(&mut self) {
+        // Parole failure is a hard corruption event.
+        self.in_parole = false;
+        self.parole_successes = 0;
+    }
+
+    /// Whether this peer is currently in parole mode.
+    pub fn is_in_parole(&self) -> bool {
+        self.in_parole
+    }
+
+    /// Applies a timed exclusion to this peer (aMule DeadSourceList pattern).
+    ///
+    /// If the peer is already excluded, the backoff is doubled (capped at
+    /// [`MAX_EXCLUSION_SECS`]). If not, a new exclusion starts at
+    /// [`BASE_EXCLUSION_SECS`].
+    ///
+    /// Call this from the coordinator when the corruption ledger identifies
+    /// a peer as the primary blame source, instead of permanent blacklisting.
+    pub fn apply_exclusion(&mut self, now: Instant) {
+        match self.exclusion {
+            Some(ref mut entry) => entry.extend(now),
+            None => {
+                self.exclusion = Some(ExclusionEntry::new(
+                    now,
+                    Duration::from_secs(BASE_EXCLUSION_SECS),
+                ));
+            }
+        }
+    }
+
+    /// Whether this peer is currently in timed exclusion.
+    ///
+    /// Returns `true` if an exclusion is active and has not expired.
+    /// The coordinator should skip this peer during piece selection.
+    pub fn is_excluded(&self, now: Instant) -> bool {
+        self.exclusion.as_ref().is_some_and(|e| e.is_active(now))
+    }
+
+    /// Returns the exclusion entry, if any.
+    pub fn exclusion(&self) -> Option<&ExclusionEntry> {
+        self.exclusion.as_ref()
     }
 
     /// Creates a cross-session reputation snapshot from this peer's stats.
@@ -1439,6 +1704,68 @@ mod tests {
         assert!(tracker.identity(0).is_none());
     }
 
+    // ── Parole mode ─────────────────────────────────────────────────
+
+    /// Entering parole resets consecutive success counter.
+    ///
+    /// A peer enters parole when suspicion of corruption arises. The
+    /// counter must restart so the peer proves itself from scratch.
+    #[test]
+    fn enter_parole_resets_counter() {
+        let now = Instant::now();
+        let mut stats = PeerStats::new(now);
+        stats.parole_successes = 5; // leftover from something
+        stats.enter_parole();
+        assert!(stats.is_in_parole());
+        assert_eq!(stats.parole_successes, 0);
+    }
+
+    /// Successful parole delivery promotes the peer back to normal.
+    ///
+    /// After `PAROLE_REQUIRED_SUCCESSES` (1) consecutive verified whole
+    /// pieces, the peer leaves parole. This isolates the corrupt peer: if
+    /// a piece passes verification from a single peer, that peer is clean.
+    #[test]
+    fn parole_success_exits_parole() {
+        let now = Instant::now();
+        let mut stats = PeerStats::new(now);
+        stats.enter_parole();
+        assert!(stats.is_in_parole());
+
+        let exited = stats.record_parole_success();
+        assert!(exited);
+        assert!(!stats.is_in_parole());
+    }
+
+    /// Parole failure marks the peer as definitively corrupt.
+    ///
+    /// When a whole piece from a paroled peer fails verification, that
+    /// peer is the sole suspect. The coordinator should blacklist it.
+    #[test]
+    fn parole_failure_exits_parole() {
+        let now = Instant::now();
+        let mut stats = PeerStats::new(now);
+        stats.enter_parole();
+        stats.record_parole_failure();
+        assert!(!stats.is_in_parole());
+    }
+
+    /// `record_parole_success` on a non-paroled peer returns false.
+    #[test]
+    fn parole_success_without_parole_returns_false() {
+        let now = Instant::now();
+        let mut stats = PeerStats::new(now);
+        assert!(!stats.record_parole_success());
+    }
+
+    /// Fresh peer stats start not in parole.
+    #[test]
+    fn new_peer_not_in_parole() {
+        let now = Instant::now();
+        let stats = PeerStats::new(now);
+        assert!(!stats.is_in_parole());
+    }
+
     /// `find_by_identity` returns `None` for unregistered identities.
     #[test]
     fn find_by_identity_unknown() {
@@ -1657,5 +1984,62 @@ mod tests {
         let mut stats = PeerStats::new(now);
         stats.record_rejection(RejectionReason::RateLimited, now);
         assert!(stats.has_interacted());
+    }
+
+    // ── Tiered exclusion scope (IRC K-line/G-line/Z-line) ───────────
+
+    /// New exclusions start at Local scope (K-line).
+    ///
+    /// The first offense only affects this coordinator. Shared and subnet
+    /// exclusions require corroboration from other peers.
+    #[test]
+    fn new_exclusion_is_local() {
+        let now = Instant::now();
+        let entry = ExclusionEntry::new(now, Duration::from_secs(BASE_EXCLUSION_SECS));
+        assert_eq!(entry.scope, ExclusionScope::Local);
+        assert_eq!(entry.corroborations, 0);
+    }
+
+    /// Corroborations escalate scope from Local to Shared at threshold.
+    ///
+    /// IRC G-line requires 3 operators to agree. Similarly, 3 independent
+    /// peers reporting corruption escalates to Shared scope.
+    #[test]
+    fn corroboration_escalates_to_shared() {
+        let now = Instant::now();
+        let mut entry = ExclusionEntry::new(now, Duration::from_secs(BASE_EXCLUSION_SECS));
+
+        entry.add_corroboration();
+        entry.add_corroboration();
+        assert_eq!(entry.scope, ExclusionScope::Local);
+
+        entry.add_corroboration(); // 3rd → Shared
+        assert_eq!(entry.scope, ExclusionScope::Shared);
+        assert_eq!(entry.corroborations, 3);
+    }
+
+    /// Further corroborations escalate to Subnet scope.
+    ///
+    /// IRC Z-line bans an entire IP range. 5 independent reports from
+    /// the same subnet indicate a compromised network segment.
+    #[test]
+    fn corroboration_escalates_to_subnet() {
+        let now = Instant::now();
+        let mut entry = ExclusionEntry::new(now, Duration::from_secs(BASE_EXCLUSION_SECS));
+
+        for _ in 0..5 {
+            entry.add_corroboration();
+        }
+
+        assert_eq!(entry.scope, ExclusionScope::Subnet);
+        assert_eq!(entry.corroborations, 5);
+    }
+
+    /// ExclusionScope enum equality.
+    #[test]
+    fn exclusion_scope_equality() {
+        assert_eq!(ExclusionScope::Local, ExclusionScope::Local);
+        assert_ne!(ExclusionScope::Local, ExclusionScope::Shared);
+        assert_ne!(ExclusionScope::Shared, ExclusionScope::Subnet);
     }
 }

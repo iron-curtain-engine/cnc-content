@@ -53,6 +53,8 @@ pub mod coordinator;
 pub mod downloader;
 pub mod downloads;
 pub mod executor;
+#[cfg(feature = "ffi")]
+pub mod ffi;
 pub mod iscab;
 pub mod packages;
 pub mod recipes;
@@ -84,7 +86,7 @@ pub enum GameId {
     /// NOT freeware — local source extraction only, no downloads.
     Dune2000,
     /// Command & Conquer: Tiberian Sun (1999) + Firestorm.
-    /// NOT freeware — local source extraction only.
+    /// EA-declared freeware (2010) — promoting the release of C&C4.
     TiberianSun,
     /// Command & Conquer: Red Alert 2 (2000) + Yuri's Revenge.
     /// NOT freeware — local source extraction only.
@@ -123,7 +125,10 @@ impl GameId {
 
     /// Whether this game's content is EA-declared freeware and can be downloaded.
     pub fn is_freeware(self) -> bool {
-        matches!(self, GameId::RedAlert | GameId::TiberianDawn)
+        matches!(
+            self,
+            GameId::RedAlert | GameId::TiberianDawn | GameId::TiberianSun
+        )
     }
 
     /// Parse from a CLI slug string.
@@ -195,7 +200,7 @@ pub enum PackageId {
     /// Complete Dune 2000 game data. NOT freeware — local extraction only.
     Dune2000Base,
 
-    // ── Tiberian Sun (local source only) ────────────────────────────
+    // ── Tiberian Sun (freeware since 2010) ────────────────────────────
     /// Core Tiberian Sun data: tibsun.mix, cache.mix, conquer.mix, etc.
     TsBase,
     /// Firestorm expansion data.
@@ -277,7 +282,7 @@ pub enum SourceId {
     /// Dune 2000 GOG.com install. NOT freeware — local extraction only.
     GogDune2000,
 
-    // ── Tiberian Sun sources (local only) ────────────────────────────
+    // ── Tiberian Sun sources ───────────────────────────────────────────
     /// Tiberian Sun retail CD.
     TsDisc,
     /// Firestorm expansion CD.
@@ -352,8 +357,26 @@ pub enum DownloadId {
     TdGdiIso,
     /// Full Nod disc ISO (CNCNZ freeware mirror).
     TdNodIso,
-    // NOTE: No Dune 2 or Dune 2000 downloads — they are NOT freeware.
-    // Only EA-declared freeware (RA, TD) may be downloaded.
+    // ── Tiberian Sun downloads ──────────────────────────────────────
+    /// TS base game files via OpenRA mirrors (ts-packages.zip, ~33 MiB).
+    TsBaseFiles,
+    /// Quick-install base + Firestorm (ts-quickinstall.zip, ~41 MiB).
+    TsQuickInstall,
+    /// Firestorm expansion files via OpenRA mirrors (ts-expand.zip, ~9 MiB).
+    TsExpand,
+    /// Full GDI disc ISO (cnc-comm.com freeware mirror).
+    TsGdiIso,
+    /// Full Nod disc ISO (cnc-comm.com freeware mirror).
+    TsNodIso,
+    /// Full Firestorm disc ISO (cnc-comm.com freeware mirror).
+    TsFirestormIso,
+    /// Tiberian Sun music (scores.mix) — IC-hosted freeware.
+    TsMusic,
+    /// Tiberian Sun FMV cutscenes (movies01.mix) — IC-hosted freeware.
+    TsMovies,
+    // NOTE: No Dune 2, Dune 2000, RA2, or Generals downloads — they
+    // are NOT freeware. Only EA-declared freeware (RA, TD, TS) may be
+    // downloaded.
 }
 
 /// Controls how the client shares downloaded content with other peers.
@@ -529,14 +552,17 @@ pub struct DownloadPackage {
     /// Human-readable title for UI display.
     pub title: String,
     /// URL that returns a newline-separated list of mirror URLs.
-    /// Empty string if this download uses direct URLs only.
-    pub mirror_list_url: String,
+    /// `None` if this download uses direct URLs only.
+    pub mirror_list_url: Option<String>,
     /// Direct download URLs (tried in order). Used when no mirror list exists.
     pub direct_urls: Vec<String>,
-    /// Expected SHA-1 of the downloaded archive (40 hex chars, or all-zero placeholder).
-    pub sha1: String,
-    /// BitTorrent info hash (hex) for P2P download. Empty if no torrent available.
-    pub info_hash: String,
+    /// Expected SHA-1 of the downloaded archive (40 hex chars).
+    /// `None` when the hash has not yet been computed (content ZIP not yet built).
+    /// The downloader skips verification when this is `None`.
+    pub sha1: Option<String>,
+    /// BitTorrent info hash (40 hex chars) for P2P download.
+    /// `None` when no `.torrent` file has been generated yet.
+    pub info_hash: Option<String>,
     /// Well-known tracker URLs for BitTorrent downloads.
     pub trackers: Vec<String>,
     /// BEP 19 web seed URLs — HTTP mirrors that participate as seeds in the
@@ -549,6 +575,14 @@ pub struct DownloadPackage {
     /// At runtime, the coordinator also treats dynamically-resolved mirror
     /// list URLs as additional web seed peers.
     pub web_seeds: Vec<String>,
+    /// Cached mirror URLs embedded at compile time.
+    ///
+    /// These are periodically fetched from the upstream `mirror_list_url`
+    /// by a GitHub Action and stored directly in `downloads.toml`. They
+    /// provide a tamper-proof baseline of known-good mirrors that works
+    /// even if the runtime mirror list fetch fails or is blocked.
+    #[serde(default)]
+    pub mirrors: Vec<String>,
     /// Which packages installing this download provides.
     pub provides: Vec<PackageId>,
     /// Format hint for extraction: "zip", "iso", "raw", etc.
@@ -559,12 +593,13 @@ pub struct DownloadPackage {
 
 impl DownloadPackage {
     /// Returns `true` if this download has at least one reachable source
-    /// (mirror list URL, direct URL, web seed, or torrent info hash).
+    /// (mirrors, mirror list URL, direct URL, web seed, or torrent info hash).
     pub fn is_available(&self) -> bool {
-        !self.mirror_list_url.is_empty()
+        !self.mirrors.is_empty()
+            || self.mirror_list_url.is_some()
             || !self.direct_urls.is_empty()
             || !self.web_seeds.is_empty()
-            || !self.info_hash.is_empty()
+            || self.info_hash.is_some()
     }
 }
 

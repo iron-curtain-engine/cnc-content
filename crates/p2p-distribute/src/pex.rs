@@ -166,6 +166,105 @@ impl PexMessage {
     }
 }
 
+// ── PexDeltaTracker (IRC spanning-tree multicast pattern) ───────────
+
+/// Tracks per-recipient "already-knows" peer sets for delta-only PEX broadcast.
+///
+/// ## Why (IRC spanning-tree multicast efficiency lesson)
+///
+/// Naïve PEX broadcasting sends the full peer list to every recipient on
+/// every gossip interval. This wastes bandwidth because most peers already
+/// know about most other peers after the first exchange. IRC avoids this
+/// with its spanning-tree topology — messages traverse each link exactly
+/// once. BitTorrent's BEP-11 recommends "send only new peers", but leaves
+/// tracking to the implementation.
+///
+/// ## How
+///
+/// `PexDeltaTracker` maintains a [`HashSet<PeerId>`] per recipient. When
+/// building a PEX message for a recipient, the caller asks the tracker to
+/// [`filter_new`] the candidate list — only entries the recipient has not
+/// seen are included. After sending, the caller calls [`mark_sent`] to
+/// record that the recipient now knows about those peers.
+///
+/// ## Bounded memory
+///
+/// The tracker enforces [`MAX_TRACKED_PEERS`] per recipient. When the
+/// known-set exceeds this limit, older entries are **not** evicted (sets
+/// are unordered). Instead, the excess is tolerated because PEX messages
+/// are capped at [`MAX_PEX_ADDED`] per interval anyway. Recipients that
+/// disconnect are cleaned up via [`remove_recipient`].
+pub struct PexDeltaTracker {
+    /// Per-recipient set of PeerIds the recipient already knows.
+    known: std::collections::HashMap<PeerId, std::collections::HashSet<PeerId>>,
+}
+
+/// Maximum number of known-peer entries tracked per recipient.
+///
+/// Beyond this, the set is saturated and new additions are still tracked
+/// (HashSet grows) but the practical impact is bounded because PEX messages
+/// themselves are capped at [`MAX_PEX_ADDED`].
+pub const MAX_TRACKED_PEERS: usize = 200;
+
+impl PexDeltaTracker {
+    /// Creates an empty delta tracker.
+    pub fn new() -> Self {
+        Self {
+            known: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Filters a candidate list down to only peers the recipient has not seen.
+    ///
+    /// Returns the subset of `candidates` whose `peer_id` is not in the
+    /// recipient's known-set. The returned entries preserve their original
+    /// order (stable filter).
+    pub fn filter_new(&self, recipient: &PeerId, candidates: &[PexEntry]) -> Vec<PexEntry> {
+        let known_set = self.known.get(recipient);
+        candidates
+            .iter()
+            .filter(|entry| {
+                known_set
+                    .map(|s| !s.contains(&entry.peer_id))
+                    .unwrap_or(true)
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Records that the recipient now knows about the given peer IDs.
+    ///
+    /// Call this after successfully sending a PEX message containing these
+    /// entries, so subsequent messages don't re-send them.
+    pub fn mark_sent(&mut self, recipient: &PeerId, sent_peers: &[PeerId]) {
+        let set = self.known.entry(*recipient).or_default();
+        for id in sent_peers {
+            set.insert(*id);
+        }
+    }
+
+    /// Removes all tracking state for a recipient (e.g. on disconnect).
+    pub fn remove_recipient(&mut self, recipient: &PeerId) {
+        self.known.remove(recipient);
+    }
+
+    /// Returns the number of tracked recipients.
+    pub fn recipient_count(&self) -> usize {
+        self.known.len()
+    }
+
+    /// Returns how many peers the given recipient is known to know.
+    pub fn known_count(&self, recipient: &PeerId) -> usize {
+        self.known.get(recipient).map(|s| s.len()).unwrap_or(0)
+    }
+}
+
+impl Default for PexDeltaTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,5 +420,124 @@ mod tests {
                 .push(PeerId::from_key_material(format!("peer-{i}").as_bytes()));
         }
         assert!(msg.is_oversized());
+    }
+
+    // ── PexDeltaTracker (IRC spanning-tree multicast) ───────────────
+
+    /// New tracker starts with no recipients.
+    #[test]
+    fn delta_tracker_starts_empty() {
+        let tracker = PexDeltaTracker::new();
+        assert_eq!(tracker.recipient_count(), 0);
+    }
+
+    /// All candidates pass through when recipient has no history.
+    ///
+    /// A new recipient has an empty known-set, so every candidate is new.
+    #[test]
+    fn delta_tracker_all_new_for_unknown_recipient() {
+        let tracker = PexDeltaTracker::new();
+        let recipient = PeerId::from_key_material(b"recipient");
+        let candidates = vec![
+            PexEntry {
+                peer_id: PeerId::from_key_material(b"p1"),
+                addr: "1.2.3.4:6881".into(),
+                flags: PexFlags::default(),
+            },
+            PexEntry {
+                peer_id: PeerId::from_key_material(b"p2"),
+                addr: "5.6.7.8:6881".into(),
+                flags: PexFlags::default(),
+            },
+        ];
+        let filtered = tracker.filter_new(&recipient, &candidates);
+        assert_eq!(filtered.len(), 2);
+    }
+
+    /// Already-sent peers are filtered out on subsequent calls.
+    ///
+    /// After marking p1 as sent, the next filter_new call should exclude p1
+    /// but still include p2.
+    #[test]
+    fn delta_tracker_filters_already_known() {
+        let mut tracker = PexDeltaTracker::new();
+        let recipient = PeerId::from_key_material(b"recipient");
+        let p1 = PeerId::from_key_material(b"p1");
+        let p2 = PeerId::from_key_material(b"p2");
+
+        tracker.mark_sent(&recipient, std::slice::from_ref(&p1));
+
+        let candidates = vec![
+            PexEntry {
+                peer_id: p1,
+                addr: "1.2.3.4:6881".into(),
+                flags: PexFlags::default(),
+            },
+            PexEntry {
+                peer_id: p2,
+                addr: "5.6.7.8:6881".into(),
+                flags: PexFlags::default(),
+            },
+        ];
+        let filtered = tracker.filter_new(&recipient, &candidates);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].peer_id, p2);
+    }
+
+    /// Per-recipient isolation — marking sent for one doesn't affect another.
+    #[test]
+    fn delta_tracker_per_recipient_isolation() {
+        let mut tracker = PexDeltaTracker::new();
+        let r1 = PeerId::from_key_material(b"r1");
+        let r2 = PeerId::from_key_material(b"r2");
+        let p1 = PeerId::from_key_material(b"p1");
+
+        tracker.mark_sent(&r1, std::slice::from_ref(&p1));
+
+        let candidates = vec![PexEntry {
+            peer_id: p1,
+            addr: "1.2.3.4:6881".into(),
+            flags: PexFlags::default(),
+        }];
+
+        // r1 already knows p1 → filtered out
+        assert_eq!(tracker.filter_new(&r1, &candidates).len(), 0);
+        // r2 doesn't know p1 → passes through
+        assert_eq!(tracker.filter_new(&r2, &candidates).len(), 1);
+    }
+
+    /// Removing a recipient clears all tracking state.
+    #[test]
+    fn delta_tracker_remove_recipient() {
+        let mut tracker = PexDeltaTracker::new();
+        let r = PeerId::from_key_material(b"r");
+        let p = PeerId::from_key_material(b"p");
+
+        tracker.mark_sent(&r, std::slice::from_ref(&p));
+        assert_eq!(tracker.known_count(&r), 1);
+
+        tracker.remove_recipient(&r);
+        assert_eq!(tracker.recipient_count(), 0);
+        assert_eq!(tracker.known_count(&r), 0);
+    }
+
+    /// known_count reflects the number of known peers per recipient.
+    #[test]
+    fn delta_tracker_known_count() {
+        let mut tracker = PexDeltaTracker::new();
+        let r = PeerId::from_key_material(b"r");
+        let p1 = PeerId::from_key_material(b"p1");
+        let p2 = PeerId::from_key_material(b"p2");
+
+        assert_eq!(tracker.known_count(&r), 0);
+        tracker.mark_sent(&r, &[p1, p2]);
+        assert_eq!(tracker.known_count(&r), 2);
+    }
+
+    /// Default trait implementation works.
+    #[test]
+    fn delta_tracker_default() {
+        let tracker = PexDeltaTracker::default();
+        assert_eq!(tracker.recipient_count(), 0);
     }
 }

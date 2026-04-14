@@ -14,6 +14,19 @@ use super::ra_base::AFTERMATH_EXPAND_COPY;
 use super::ra_remastered::{AM_MUSIC_COPY, CS_MUSIC_COPY};
 use crate::actions::{FileMapping, InstallAction};
 
+/// TFD InstallShield CAB volume list — shared by all TFD ISCAB recipes.
+///
+/// The First Decade DVD stores RA (and other games) inside an InstallShield
+/// CAB archive split across five data volumes. The header file `data1.hdr`
+/// describes the archive layout; the five `.cab` volumes contain the data.
+pub(super) static TFD_VOLUMES: [(u32, &str); 5] = [
+    (1, "data1.cab"),
+    (2, "data2.cab"),
+    (3, "data3.cab"),
+    (4, "data4.cab"),
+    (5, "data5.cab"),
+];
+
 /// Allied movies: extract movies1.mix from MAIN.MIX → extract VQAs → cleanup.
 pub(super) static MOVIES_ALLIED_FROM_MAIN_MIX: [InstallAction; 3] = [
     InstallAction::ExtractMix {
@@ -477,6 +490,47 @@ pub(super) static MOVIES_SOVIET_VQA_ENTRIES: [FileMapping; 55] = [
     FileMapping {
         from: "v2rocket.vqa",
         to: "movies/v2rocket.vqa",
+    },
+];
+
+// ── Remastered Collection movie extraction ───────────────────────────
+// The Remastered Collection nests original RA data under
+// `Data/CNCDATA/RED_ALERT/CD1/`. The same MAIN.MIX containing
+// movies1.mix and movies2.mix is present — just at a deeper path.
+
+/// Allied movies from the Remastered Collection's nested MAIN.MIX.
+pub(super) static MOVIES_ALLIED_FROM_REMASTERED_MIX: [InstallAction; 3] = [
+    InstallAction::ExtractMix {
+        source_mix: "Data/CNCDATA/RED_ALERT/CD1/MAIN.MIX",
+        entries: &[FileMapping {
+            from: "movies1.mix",
+            to: ".tmp/movies1.mix",
+        }],
+    },
+    InstallAction::ExtractMixFromContent {
+        content_mix: ".tmp/movies1.mix",
+        entries: &MOVIES_ALLIED_VQA_ENTRIES,
+    },
+    InstallAction::Delete {
+        path: ".tmp/movies1.mix",
+    },
+];
+
+/// Soviet movies from the Remastered Collection's nested MAIN.MIX.
+pub(super) static MOVIES_SOVIET_FROM_REMASTERED_MIX: [InstallAction; 3] = [
+    InstallAction::ExtractMix {
+        source_mix: "Data/CNCDATA/RED_ALERT/CD1/MAIN.MIX",
+        entries: &[FileMapping {
+            from: "movies2.mix",
+            to: ".tmp/movies2.mix",
+        }],
+    },
+    InstallAction::ExtractMixFromContent {
+        content_mix: ".tmp/movies2.mix",
+        entries: &MOVIES_SOVIET_VQA_ENTRIES,
+    },
+    InstallAction::Delete {
+        path: ".tmp/movies2.mix",
     },
 ];
 

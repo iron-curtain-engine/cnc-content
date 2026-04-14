@@ -21,6 +21,9 @@ thiserror = "2.0"
 # HTTP web seed peer (BEP 19 — fetch pieces via Range requests)
 ureq = { version = "3", optional = true }
 
+[dev-dependencies]
+tempfile = "3"
+
 [features]
 default = ["http"]
 http = ["dep:ureq"]

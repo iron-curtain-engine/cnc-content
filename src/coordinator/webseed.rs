@@ -32,6 +32,14 @@ use std::time::Instant;
 
 use super::{Peer, PeerError, PeerKind};
 
+/// Maximum number of HTTP redirects allowed for web seed requests.
+///
+/// Mirrors the restriction in the downloader's `make_agent()`. CDN redirects
+/// (e.g. GitHub Releases → objects.githubusercontent.com) need 1–2 hops;
+/// 5 is generous. Limiting redirects reduces the window for redirect-chain
+/// SSRF attacks should a mirror be compromised.
+pub(super) const MAX_REDIRECTS: u32 = 5;
+
 /// An HTTP web seed peer implementing BEP 19 piece fetching.
 ///
 /// Wraps a single URL that serves the complete archive file. Thread-safe:
@@ -121,7 +129,12 @@ impl Peer for WebSeedPeer {
 
         // ── HTTP Range request ──────────────────────────────────────
         //
-        // ureq handles redirects, TLS, and connection pooling internally.
+        // Security hardening mirrors downloader::mirror::make_agent():
+        // - `https_only(true)` prevents HTTP-downgrade on redirect. All mirrors
+        //   use HTTPS; a redirect to plain HTTP indicates compromise.
+        // - `max_redirects(MAX_REDIRECTS)` limits redirect-chain length to reduce
+        //   SSRF attack surface should a trusted mirror be compromised.
+        //
         // The timeout is set per the CNC_DOWNLOAD_TIMEOUT env var (default 300s).
         let timeout_secs: u64 = std::env::var("CNC_DOWNLOAD_TIMEOUT")
             .ok()
@@ -130,6 +143,8 @@ impl Peer for WebSeedPeer {
 
         let agent = ureq::config::Config::builder()
             .timeout_global(Some(std::time::Duration::from_secs(timeout_secs)))
+            .max_redirects(MAX_REDIRECTS)
+            .https_only(true)
             .build()
             .new_agent();
 

@@ -31,7 +31,7 @@ pub fn cmd_download(
             style("✗").red().bold(),
             game.title()
         );
-        eprintln!("Only EA-declared freeware games (Red Alert, Tiberian Dawn) can be downloaded.");
+        eprintln!("Only EA-declared freeware games (Red Alert, Tiberian Dawn, Tiberian Sun) can be downloaded.");
         eprintln!(
             "If you have a local copy, use: cnc-content --game {} install <path>",
             game.slug()
@@ -71,7 +71,9 @@ pub fn cmd_download(
             progress::print_section_header("Required content", "HTTP");
             let title = format!("{} required", game.title());
             let mut display = progress::ProgressDisplay::new(&title);
-            if let Err(e) = download_missing(content_root, game, &mut |evt| display.update(evt)) {
+            if let Err(e) = download_missing(content_root, game, seeding_policy, &mut |evt| {
+                display.update(evt)
+            }) {
                 eprintln!("\n  {} Download failed: {e}", style("✗").red().bold());
                 process::exit(1);
             }
@@ -138,7 +140,9 @@ pub fn cmd_download(
         progress::print_section_header(&format!("{} — required content", game.title()), "HTTP");
         let title = format!("{} required", game.title());
         let mut display = progress::ProgressDisplay::new(&title);
-        if let Err(e) = download_missing(content_root, game, &mut |evt| display.update(evt)) {
+        if let Err(e) = download_missing(content_root, game, seeding_policy, &mut |evt| {
+            display.update(evt)
+        }) {
             eprintln!("\n  {} Download failed: {e}", style("✗").red().bold());
             process::exit(1);
         }
@@ -372,63 +376,92 @@ pub fn cmd_torrent_create(output_dir: Option<&std::path::Path>, game_filter: Opt
             }
         }
 
-        // We need a local copy of the package to hash pieces. Look for the
-        // downloaded ZIP in the output directory (named by download ID slug).
         let file_name = format!("{:?}.zip", dl.id).to_lowercase().replace("::", "-");
         let zip_path = output.join(&file_name);
+        let web_seed_strs: Vec<&str> = dl.web_seeds.iter().map(String::as_str).collect();
+        let torrent_name = file_name.replace(".zip", ".torrent");
+        let torrent_path = output.join(&torrent_name);
 
-        if !zip_path.exists() {
-            // Try to download the package.
-            if !dl.is_available() {
-                println!("  SKIP {:?} — no download source available", dl.id);
-                skipped += 1;
-                continue;
-            }
+        // ── Cached file on disk: use file-based create_torrent ──────
+        if zip_path.exists() {
+            println!("  Using cached {:?} at {}", dl.id, zip_path.display());
 
-            println!(
-                "  Downloading {:?} ({})...",
-                dl.id,
-                format_size(dl.size_hint)
-            );
-            match download_to_file(dl, &zip_path) {
-                Ok(()) => println!("    Downloaded to {}", zip_path.display()),
+            let file_size = std::fs::metadata(&zip_path).map(|m| m.len()).unwrap_or(0);
+            let piece_length = recommended_piece_length(file_size);
+
+            match create_torrent(&zip_path, piece_length, &trackers, &web_seed_strs) {
+                Ok(meta) => {
+                    if let Err(e) = std::fs::write(&torrent_path, &meta.torrent_data) {
+                        eprintln!("    Failed to write {}: {e}", torrent_path.display());
+                        continue;
+                    }
+                    print_torrent_result(&meta, &torrent_path);
+                    generated += 1;
+                }
                 Err(e) => {
-                    eprintln!("    FAILED: {e}");
+                    eprintln!("    Torrent creation failed: {e}");
                     skipped += 1;
-                    continue;
                 }
             }
-        } else {
-            println!("  Using cached {:?} at {}", dl.id, zip_path.display());
+            continue;
         }
 
-        // Select piece length based on D049 size-tier strategy.
-        let file_size = std::fs::metadata(&zip_path).map(|m| m.len()).unwrap_or(0);
-        let piece_length = recommended_piece_length(file_size);
+        // ── No cached file: stream from HTTP, hash on the fly ───────
+        //
+        // Resolves mirror URLs, streams the HTTP response body through a
+        // TorrentBuilder that hashes pieces as bytes arrive. The file
+        // never touches disk — the .torrent is produced purely from the
+        // network stream. This avoids downloading hundreds of megabytes
+        // to disk just to re-read them for piece hashing.
+        if !dl.is_available() {
+            println!("  SKIP {:?} — no download source available", dl.id);
+            skipped += 1;
+            continue;
+        }
 
-        let web_seed_strs: Vec<&str> = dl.web_seeds.iter().map(String::as_str).collect();
-        match create_torrent(&zip_path, piece_length, &trackers, &web_seed_strs) {
+        let urls = resolve_download_urls(dl);
+        if urls.is_empty() {
+            println!("  SKIP {:?} — no download URLs resolved", dl.id);
+            skipped += 1;
+            continue;
+        }
+
+        println!("  Streaming {:?} ({})...", dl.id, format_size(dl.size_hint));
+
+        // Determine piece length from the expected file size (size_hint).
+        // If size_hint is 0, use DEFAULT_PIECE_LENGTH — the actual file
+        // size is unknown until the download completes.
+        let piece_length = if dl.size_hint > 0 {
+            recommended_piece_length(dl.size_hint)
+        } else {
+            cnc_content::torrent_create::DEFAULT_PIECE_LENGTH
+        };
+
+        // Derive the torrent file name from the first URL's path component.
+        // This must match what all clients would use as the filename so that
+        // the info_hash is identical.
+        let torrent_file_name = urls
+            .first()
+            .and_then(|u| u.rsplit('/').next())
+            .unwrap_or(&file_name);
+
+        match stream_and_hash(
+            &urls,
+            torrent_file_name,
+            piece_length,
+            &trackers,
+            &web_seed_strs,
+        ) {
             Ok(meta) => {
-                // Write .torrent file.
-                let torrent_name = file_name.replace(".zip", ".torrent");
-                let torrent_path = output.join(&torrent_name);
                 if let Err(e) = std::fs::write(&torrent_path, &meta.torrent_data) {
                     eprintln!("    Failed to write {}: {e}", torrent_path.display());
                     continue;
                 }
-
-                println!("    info_hash: {}", meta.info_hash);
-                println!(
-                    "    pieces: {}, file size: {}",
-                    meta.piece_count,
-                    format_size(meta.file_size)
-                );
-                println!("    .torrent: {}", torrent_path.display());
-                println!();
+                print_torrent_result(&meta, &torrent_path);
                 generated += 1;
             }
             Err(e) => {
-                eprintln!("    Torrent creation failed: {e}");
+                eprintln!("    FAILED: {e}");
                 skipped += 1;
             }
         }
@@ -436,9 +469,105 @@ pub fn cmd_torrent_create(output_dir: Option<&std::path::Path>, game_filter: Opt
 
     println!("\nDone: {generated} torrent(s) generated, {skipped} skipped.");
     if generated > 0 {
-        println!("\nPaste these info_hash values into src/downloads.rs:");
-        println!("Then seed the .torrent files to activate P2P distribution.");
+        println!("\nPaste these info_hash values into data/downloads.toml:");
+        println!("Then embed the .torrent files in data/torrents/ to activate P2P.");
     }
+}
+
+/// Prints the result of a successful torrent creation.
+fn print_torrent_result(
+    meta: &cnc_content::torrent_create::TorrentMetadata,
+    torrent_path: &std::path::Path,
+) {
+    println!("    info_hash: {}", meta.info_hash);
+    println!(
+        "    pieces: {}, file size: {}",
+        meta.piece_count,
+        format_size(meta.file_size)
+    );
+    println!("    .torrent: {}", torrent_path.display());
+    println!();
+}
+
+/// Resolves download URLs for a package (mirror list + direct URLs).
+fn resolve_download_urls(dl: &cnc_content::DownloadPackage) -> Vec<String> {
+    // Fetch mirror list if available, fall back to direct URLs.
+    if let Some(url) = &dl.mirror_list_url {
+        match ureq::get(url).call() {
+            Ok(response) => {
+                let body = response.into_body().read_to_string().unwrap_or_default();
+                let mirrors: Vec<String> = body
+                    .lines()
+                    .map(|l| l.trim().to_string())
+                    .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                    .collect();
+                if !mirrors.is_empty() {
+                    return mirrors;
+                }
+            }
+            Err(e) => {
+                eprintln!("    Mirror list fetch failed: {e}");
+            }
+        }
+    }
+    dl.direct_urls.iter().map(|u| u.to_string()).collect()
+}
+
+/// Streams a file from HTTP mirrors through a TorrentBuilder, hashing
+/// pieces on the fly without writing the file to disk.
+///
+/// Tries each URL in order. On the first successful HTTP response, reads
+/// the body in 64 KiB chunks and feeds each chunk to the builder. Returns
+/// the finalized TorrentMetadata.
+fn stream_and_hash(
+    urls: &[String],
+    file_name: &str,
+    piece_length: u64,
+    trackers: &[&str],
+    web_seeds: &[&str],
+) -> Result<cnc_content::torrent_create::TorrentMetadata, String> {
+    use std::io::Read;
+
+    use cnc_content::torrent_create::TorrentBuilder;
+
+    let mut last_err = String::new();
+    for url in urls {
+        let response = match ureq::get(url).call() {
+            Ok(r) => r,
+            Err(e) => {
+                last_err = format!("{url}: {e}");
+                continue;
+            }
+        };
+
+        let mut reader = response.into_body().into_reader();
+        let mut builder = TorrentBuilder::new(file_name, piece_length);
+        let mut buf = [0u8; 64 * 1024]; // 64 KiB read buffer
+
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break, // EOF
+                Ok(n) => {
+                    if let Some(chunk) = buf.get(..n) {
+                        builder.write(chunk);
+                    }
+                }
+                Err(e) => {
+                    last_err = format!("{url}: read error: {e}");
+                    break;
+                }
+            }
+        }
+
+        // Only finalize if we read at least some bytes.
+        if builder.bytes_written() > 0 {
+            return builder
+                .finalize(trackers, web_seeds)
+                .map_err(|e| e.to_string());
+        }
+    }
+
+    Err(format!("all mirrors failed, last error: {last_err}"))
 }
 
 /// Resolves a CLI package name to a DownloadId for the given game.
@@ -537,59 +666,4 @@ fn resolve_package_name(name: &str) -> cnc_content::PackageId {
             process::exit(1);
         }
     }
-}
-
-/// Downloads a package to a local file using the HTTP downloader.
-fn download_to_file(
-    dl: &cnc_content::DownloadPackage,
-    dest: &std::path::Path,
-) -> Result<(), String> {
-    // Resolve URLs — try mirror list first, then direct URLs.
-    let urls = if !dl.mirror_list_url.is_empty() {
-        // Fetch mirror list.
-        match ureq::get(&dl.mirror_list_url).call() {
-            Ok(response) => {
-                let body = response
-                    .into_body()
-                    .read_to_string()
-                    .map_err(|e| e.to_string())?;
-                body.lines()
-                    .map(|l| l.trim().to_string())
-                    .filter(|l| !l.is_empty() && !l.starts_with('#'))
-                    .collect::<Vec<_>>()
-            }
-            Err(e) => {
-                eprintln!("    Mirror list fetch failed: {e}");
-                dl.direct_urls.iter().map(|u| u.to_string()).collect()
-            }
-        }
-    } else {
-        dl.direct_urls.iter().map(|u| u.to_string()).collect()
-    };
-
-    if urls.is_empty() {
-        return Err("no download URLs available".into());
-    }
-
-    // Try each URL until one succeeds.
-    let mut last_err = String::new();
-    for url in &urls {
-        match download_url(url, dest) {
-            Ok(()) => return Ok(()),
-            Err(e) => {
-                last_err = e;
-                continue;
-            }
-        }
-    }
-    Err(format!("all mirrors failed, last error: {last_err}"))
-}
-
-/// Downloads a single URL to a file.
-fn download_url(url: &str, dest: &std::path::Path) -> Result<(), String> {
-    let response = ureq::get(url).call().map_err(|e| e.to_string())?;
-    let mut body = response.into_body().into_reader();
-    let mut file = std::fs::File::create(dest).map_err(|e| e.to_string())?;
-    std::io::copy(&mut body, &mut file).map_err(|e| e.to_string())?;
-    Ok(())
 }

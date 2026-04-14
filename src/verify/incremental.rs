@@ -16,7 +16,7 @@
 
 use std::path::Path;
 
-use super::{InstalledContentManifest, Sha256Scratch};
+use super::{Blake3Scratch, InstalledContentManifest};
 
 /// Result of an incremental verification pass.
 #[derive(Debug, Clone)]
@@ -48,7 +48,7 @@ pub struct IncrementalVerifyResult {
 ///
 /// ```rust
 /// use cnc_content::verify::{
-///     verify_incremental, InstalledContentManifest, FileDigest, Sha256Scratch,
+///     verify_incremental, InstalledContentManifest, FileDigest, Blake3Scratch,
 /// };
 /// use std::collections::BTreeMap;
 ///
@@ -59,14 +59,14 @@ pub struct IncrementalVerifyResult {
 /// std::fs::write(tmp.join("b.mix"), b"data-b").unwrap();
 ///
 /// // Build a manifest with correct hashes.
-/// let mut scratch = Sha256Scratch::new();
+/// let mut scratch = Blake3Scratch::new();
 /// let mut files = BTreeMap::new();
 /// files.insert("a.mix".to_string(), FileDigest {
-///     sha256: scratch.hash_file(&tmp.join("a.mix")).unwrap(),
+///     blake3: scratch.hash_file(&tmp.join("a.mix")).unwrap(),
 ///     size: 6,
 /// });
 /// files.insert("b.mix".to_string(), FileDigest {
-///     sha256: scratch.hash_file(&tmp.join("b.mix")).unwrap(),
+///     blake3: scratch.hash_file(&tmp.join("b.mix")).unwrap(),
 ///     size: 6,
 /// });
 /// let manifest = InstalledContentManifest {
@@ -95,7 +95,7 @@ pub fn verify_incremental(
         .map(|(_, entry)| *entry)
         .collect();
 
-    let mut scratch = Sha256Scratch::new();
+    let mut scratch = Blake3Scratch::new();
     let mut checked = Vec::new();
     let mut failures = Vec::new();
 
@@ -103,7 +103,7 @@ pub fn verify_incremental(
         checked.push(rel_path.clone());
         let full_path = content_root.join(rel_path);
         match scratch.hash_file(&full_path) {
-            Ok(actual) if actual == expected.sha256 => {}
+            Ok(actual) if actual == expected.blake3 => {}
             _ => failures.push(rel_path.clone()),
         }
     }
