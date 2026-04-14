@@ -198,6 +198,7 @@ pub mod rate_limiter;
 pub mod reader;
 pub mod relay;
 pub mod resume;
+pub mod scrub;
 pub mod selection;
 pub mod session_manager;
 pub mod state;
@@ -269,7 +270,7 @@ pub use metadata_exchange::{BlockStatus, MetadataError, MetadataExchange, Metada
 pub use mirror_health::{HealthTier, MirrorEntry, MirrorRegistry, MirrorRegistryError, TierCounts};
 pub use network_id::NetworkId;
 pub use obfuscation::{random_port, ObfuscationKey};
-pub use peer::{Peer, PeerCapabilities, PeerError, PeerKind, RejectionReason};
+pub use peer::{Peer, PeerCapabilities, PeerError, PeerKind, RejectionReason, StorageTier};
 pub use peer_affinity::{AffinityConfig, AffinityScorer, PeerProfile};
 pub use peer_id::{PeerId, PeerIdDecodeError, PeerIdKind};
 pub use peer_pool::{
@@ -293,6 +294,9 @@ pub use relay::{
     RelayError, RelayNode, RelayRegistry,
 };
 pub use resume::{PeerState, ResumeError, ResumeState, SubPieceProgress};
+pub use scrub::{
+    PieceHealth, ScrubConfig, ScrubError, ScrubProgress, ScrubReport, StopReason, StorageScrubber,
+};
 pub use selection::{select_multiple_pieces, select_next_piece, PieceSelection, SpeedCategory};
 pub use session_manager::{
     BasicSession, DownloadHandle, DownloadSession, SessionConfig, SessionError, SessionEvent,

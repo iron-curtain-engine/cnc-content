@@ -85,6 +85,101 @@ pub struct PeerCapabilities {
     /// Whether this peer supports priority piece requests (ic_priority).
     /// `false` means the peer only supports standard BEP 3 requests.
     pub supports_priority: bool,
+    /// Declared storage tier — lets the coordinator prefer fast sources
+    /// before any measurements are taken.
+    ///
+    /// ## Design (informed by NetApp FabricPool tiering)
+    ///
+    /// NetApp classifies storage into tiers (performance, capacity, archive)
+    /// and routes I/O to the fastest tier that holds the data. The same
+    /// principle applies here: a local SSD peer should be preferred over a
+    /// remote mirror even if we haven't measured throughput yet. Dynamic
+    /// measurements (via `speed_estimate()` and `BandwidthEstimator`) refine
+    /// the ranking over time, but the static tier avoids a slow start.
+    ///
+    /// `None` means the tier is unknown — treated as `StorageTier::Unknown`
+    /// (no preference adjustment).
+    pub storage_tier: Option<StorageTier>,
+}
+
+// ── Storage tier ────────────────────────────────────────────────────
+
+/// Declared storage speed tier for a peer.
+///
+/// Allows the coordinator to make informed piece-assignment decisions
+/// before dynamic throughput measurements are available. Inspired by
+/// NetApp's FabricPool automatic tiering, where hot data lives on SSD
+/// and cold data on capacity drives.
+///
+/// ## Ordering
+///
+/// Tiers are ordered from fastest to slowest. The coordinator prefers
+/// peers on faster tiers when multiple peers have the same piece and
+/// no throughput measurements exist yet.
+///
+/// ## Usage in the local-storage scenario
+///
+/// When each physical device is a `Peer`, the tier tells the coordinator
+/// that the SSD is faster than the HDD without waiting for measurements:
+///
+/// ```
+/// use p2p_distribute::peer::{PeerCapabilities, StorageTier};
+///
+/// let ssd = PeerCapabilities {
+///     storage_tier: Some(StorageTier::Ssd),
+///     ..PeerCapabilities::default()
+/// };
+/// let hdd = PeerCapabilities {
+///     storage_tier: Some(StorageTier::Hdd),
+///     ..PeerCapabilities::default()
+/// };
+/// assert!(ssd.storage_tier.unwrap().priority() > hdd.storage_tier.unwrap().priority());
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum StorageTier {
+    /// Solid-state drive — fast random and sequential I/O.
+    Ssd,
+    /// Spinning hard disk — fast sequential, slow random I/O.
+    Hdd,
+    /// USB flash drive, SD card — fast reads, slower writes.
+    Flash,
+    /// Network-attached storage or remote peer — variable latency.
+    Network,
+    /// Cold/archival storage (tape, Glacier) — high latency, high capacity.
+    Archive,
+    /// Tier unknown — no preference adjustment.
+    #[default]
+    Unknown,
+}
+
+impl StorageTier {
+    /// Returns a numeric priority (higher = faster / preferred).
+    ///
+    /// Used by the coordinator to break ties when multiple peers have the
+    /// same piece and no throughput measurements exist yet.
+    pub fn priority(self) -> u8 {
+        match self {
+            Self::Ssd => 5,
+            Self::Hdd => 3,
+            Self::Flash => 4,
+            Self::Network => 2,
+            Self::Archive => 1,
+            Self::Unknown => 0,
+        }
+    }
+}
+
+impl std::fmt::Display for StorageTier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ssd => write!(f, "SSD"),
+            Self::Hdd => write!(f, "HDD"),
+            Self::Flash => write!(f, "Flash"),
+            Self::Network => write!(f, "Network"),
+            Self::Archive => write!(f, "Archive"),
+            Self::Unknown => write!(f, "Unknown"),
+        }
+    }
 }
 
 // ── Peer kind ───────────────────────────────────────────────────────
@@ -314,6 +409,40 @@ mod tests {
         assert!(caps.max_concurrent_requests.is_none());
         assert!(caps.announced_piece_count.is_none());
         assert!(!caps.supports_priority);
+        assert!(caps.storage_tier.is_none());
+    }
+
+    // ── StorageTier ─────────────────────────────────────────────────
+
+    /// SSD has higher priority than HDD, Flash, Network, and Archive.
+    ///
+    /// The coordinator should prefer SSD peers when no throughput measurements
+    /// exist yet — this avoids a slow start on the first few pieces.
+    #[test]
+    fn storage_tier_priority_ordering() {
+        assert!(StorageTier::Ssd.priority() > StorageTier::Flash.priority());
+        assert!(StorageTier::Flash.priority() > StorageTier::Hdd.priority());
+        assert!(StorageTier::Hdd.priority() > StorageTier::Network.priority());
+        assert!(StorageTier::Network.priority() > StorageTier::Archive.priority());
+        assert!(StorageTier::Archive.priority() > StorageTier::Unknown.priority());
+    }
+
+    /// Unknown tier has zero priority — no preference adjustment.
+    #[test]
+    fn storage_tier_unknown_is_zero() {
+        assert_eq!(StorageTier::Unknown.priority(), 0);
+        assert_eq!(StorageTier::default(), StorageTier::Unknown);
+    }
+
+    /// Display produces human-readable tier names.
+    #[test]
+    fn storage_tier_display() {
+        assert_eq!(StorageTier::Ssd.to_string(), "SSD");
+        assert_eq!(StorageTier::Hdd.to_string(), "HDD");
+        assert_eq!(StorageTier::Flash.to_string(), "Flash");
+        assert_eq!(StorageTier::Network.to_string(), "Network");
+        assert_eq!(StorageTier::Archive.to_string(), "Archive");
+        assert_eq!(StorageTier::Unknown.to_string(), "Unknown");
     }
 
     // ── RejectionReason equality ────────────────────────────────────

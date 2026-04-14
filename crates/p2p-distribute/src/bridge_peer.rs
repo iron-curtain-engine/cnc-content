@@ -229,6 +229,8 @@ where
             announced_piece_count: Some(self.total_pieces),
             // Bridge supports priority requests — it can fetch any piece.
             supports_priority: true,
+            // Bridge is a network-attached source.
+            storage_tier: Some(crate::peer::StorageTier::Network),
         }
     }
 

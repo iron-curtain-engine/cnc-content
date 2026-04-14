@@ -780,6 +780,10 @@ pub struct Config {
 
     /// Content source discovery — registry limits, staleness, failures.
     pub content_discovery: ContentDiscoveryConfig,
+
+    /// Background integrity verification (RAID scrub analog) — controls
+    /// stop-on-first-error and scan deadlines.
+    pub scrub: crate::scrub::ScrubConfig,
 }
 
 impl Config {
@@ -1126,6 +1130,12 @@ impl ConfigBuilder {
     /// Replace the entire content discovery config.
     pub fn content_discovery_config(mut self, cfg: ContentDiscoveryConfig) -> Self {
         self.config.content_discovery = cfg;
+        self
+    }
+
+    /// Replace the entire scrub config.
+    pub fn scrub_config(mut self, cfg: crate::scrub::ScrubConfig) -> Self {
+        self.config.scrub = cfg;
         self
     }
 }
