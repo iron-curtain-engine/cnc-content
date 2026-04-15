@@ -93,6 +93,15 @@ impl NetworkId {
     pub fn as_bytes(&self) -> &[u8; NETWORK_ID_LEN] {
         &self.0
     }
+
+    /// Creates a network ID from raw bytes.
+    ///
+    /// Use this to reconstruct a `NetworkId` from a serialized
+    /// representation (e.g. a credential's canonical bytes). No
+    /// hashing is applied — the bytes are used as-is.
+    pub fn from_raw(bytes: [u8; NETWORK_ID_LEN]) -> Self {
+        Self(bytes)
+    }
 }
 
 impl std::fmt::Display for NetworkId {

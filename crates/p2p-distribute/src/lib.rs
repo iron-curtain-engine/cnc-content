@@ -166,6 +166,7 @@ pub mod connection;
 pub mod content_discovery;
 pub mod coordinator;
 pub mod corruption_ledger;
+pub mod credential;
 pub mod credit;
 pub mod demand;
 pub mod dht;
@@ -209,6 +210,7 @@ pub mod throttle;
 pub mod tiering;
 pub mod torrent_create;
 pub mod torrent_info;
+pub mod torrent_pem;
 pub mod tracker;
 pub mod upload_queue;
 pub mod url_pex;
@@ -251,6 +253,7 @@ pub use coordinator::{
     PieceCoordinator, ReconciliationDiff,
 };
 pub use corruption_ledger::{Attribution, BlameEntry, CorruptionLedger};
+pub use credential::{CredentialError, CredentialParseError, PeerCredential};
 pub use credit::{CreditEntry, CreditLedger};
 pub use demand::DemandTracker;
 pub use dht::{DhtMessage, DhtNode, KBucketEntry, NodeId, RoutingTable};
@@ -320,6 +323,7 @@ pub use torrent_create::{
     DEFAULT_PIECE_LENGTH,
 };
 pub use torrent_info::TorrentInfo;
+pub use torrent_pem::PemError;
 pub use tracker::{
     AnnounceRequest, AnnounceResponse, CompactPeer, ScrapeResponse, TrackerError, TrackerState,
     TrackerTier,
