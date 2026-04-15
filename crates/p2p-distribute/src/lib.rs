@@ -206,10 +206,12 @@ pub mod storage;
 pub mod streaming;
 pub mod superseeding;
 pub mod throttle;
+pub mod tiering;
 pub mod torrent_create;
 pub mod torrent_info;
 pub mod tracker;
 pub mod upload_queue;
+pub mod url_pex;
 pub mod work_stealing;
 
 #[cfg(feature = "http")]
@@ -312,6 +314,7 @@ pub use streaming::{
 };
 pub use superseeding::{PieceOffer, SuperSeedState};
 pub use throttle::{BandwidthThrottle, ThrottlePair};
+pub use tiering::{AccessRecord, TieringStorage};
 pub use torrent_create::{
     create_torrent, recommended_piece_length, TorrentCreateError, TorrentMetadata,
     DEFAULT_PIECE_LENGTH,
@@ -322,6 +325,10 @@ pub use tracker::{
     TrackerTier,
 };
 pub use upload_queue::{SlotResult, UploadQueue};
+pub use url_pex::{
+    UrlPexCache, UrlPexEntry, UrlPexMessage, DEFAULT_URL_EXPIRY_SECS, MAX_URLS_PER_PIECE,
+    MAX_URL_LENGTH, MAX_URL_PEX_ENTRIES,
+};
 pub use work_stealing::{StealableTask, WorkStealingScheduler};
 
 #[cfg(feature = "http")]
