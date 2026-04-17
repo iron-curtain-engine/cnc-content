@@ -9,7 +9,7 @@
 
 use crate::actions::FileMapping;
 
-pub(super) static BASE_DIRECT_COPY: [FileMapping; 11] = [
+pub(crate) static BASE_DIRECT_COPY: [FileMapping; 11] = [
     FileMapping {
         from: "allies.mix",
         to: "allies.mix",
@@ -57,7 +57,7 @@ pub(super) static BASE_DIRECT_COPY: [FileMapping; 11] = [
 ];
 
 /// Base game files — extracted from INSTALL/REDALERT.MIX (disc layout).
-pub(super) static BASE_FROM_REDALERT_MIX: [FileMapping; 11] = [
+pub(crate) static BASE_FROM_REDALERT_MIX: [FileMapping; 11] = [
     FileMapping {
         from: "allies.mix",
         to: "allies.mix",
@@ -105,7 +105,7 @@ pub(super) static BASE_FROM_REDALERT_MIX: [FileMapping; 11] = [
 ];
 
 /// Aftermath expansion files — direct copy from expand/.
-pub(super) static AFTERMATH_EXPAND_COPY: [FileMapping; 27] = [
+pub(crate) static AFTERMATH_EXPAND_COPY: [FileMapping; 27] = [
     FileMapping {
         from: "expand/expand2.mix",
         to: "expand/expand2.mix",

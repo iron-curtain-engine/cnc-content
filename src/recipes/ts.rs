@@ -16,7 +16,7 @@ use crate::actions::FileMapping;
 /// All six required MIX archives are uppercase on source (DOS convention)
 /// and lowercase in the managed content root. Used for disc, Steam TUC,
 /// and Origin TUC editions.
-pub(super) static TS_BASE_COPY: [FileMapping; 6] = [
+pub(crate) static TS_BASE_COPY: [FileMapping; 6] = [
     FileMapping {
         from: "TIBSUN.MIX",
         to: "tibsun.mix",
@@ -49,7 +49,7 @@ pub(super) static TS_BASE_COPY: [FileMapping; 6] = [
 ///
 /// The Firestorm disc and Steam/Origin TUC editions both have these
 /// expansion archives in the install root.
-pub(super) static TS_FIRESTORM_COPY: [FileMapping; 2] = [
+pub(crate) static TS_FIRESTORM_COPY: [FileMapping; 2] = [
     FileMapping {
         from: "E01SC01.MIX",
         to: "e01sc01.mix",
@@ -63,7 +63,7 @@ pub(super) static TS_FIRESTORM_COPY: [FileMapping; 2] = [
 // ── Music ───────────────────────────────────────────────────────────
 
 /// TS music — direct copy of scores.mix.
-pub(super) static TS_MUSIC_COPY: [FileMapping; 1] = [FileMapping {
+pub(crate) static TS_MUSIC_COPY: [FileMapping; 1] = [FileMapping {
     from: "SCORES.MIX",
     to: "scores.mix",
 }];
@@ -74,7 +74,7 @@ pub(super) static TS_MUSIC_COPY: [FileMapping; 1] = [FileMapping {
 ///
 /// Tiberian Sun stores all FMV cutscenes in a single MIX archive
 /// rather than as loose VQA files like the earlier games.
-pub(super) static TS_MOVIES_COPY: [FileMapping; 1] = [FileMapping {
+pub(crate) static TS_MOVIES_COPY: [FileMapping; 1] = [FileMapping {
     from: "MOVIES01.MIX",
     to: "movies01.mix",
 }];

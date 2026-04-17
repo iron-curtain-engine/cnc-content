@@ -438,6 +438,20 @@ that panics on `None`/`Err`. Use `?`, `.ok_or()`, `.map_err()`, or
 
 **Test code** may use `.unwrap()` freely.
 
+**Sole exception — `LazyLock` over compile-time embedded data:** a
+`LazyLock::new()` closure that parses data embedded with `include_str!` or
+`include_bytes!` may call `.expect()` provided:
+
+1. The embedded file is named in the error message.
+2. A code comment explains that failure is a programmer error (bad data file),
+   not a user-facing runtime error.
+3. At least one test calls the function backed by the `LazyLock` so the
+   failure mode is caught on every CI run.
+
+This exception exists because there is no meaningful recovery path: if a
+compile-time-embedded TOML file is syntactically invalid, the binary cannot
+function and should halt immediately with a clear message.
+
 ### Integer Overflow Safety
 
 Use `saturating_add` (or `checked_add` where recovery is needed) at every
@@ -597,12 +611,114 @@ lengths, piece sizes, and fixed-format header sizes should be
   be constructed. Prefer enum variants with associated data over
   `struct { kind: Kind, data: Option<T> }` where `data` is `None` for
   some `kind` values.
-- **No `unsafe` code.** This crate must never contain `unsafe` blocks,
-  `unsafe fn`, or `unsafe impl`. There is no legitimate reason for
-  `unsafe` in a content manager — all operations (hashing, I/O, parsing,
-  extraction) are expressible in safe Rust. If a dependency requires an
-  unsafe interface, find a safe alternative or wrap it in a dedicated
-  dependency crate — never bring `unsafe` into this crate's source.
+- **No `unsafe` code — except the FFI boundary.** Content management
+  logic must never use `unsafe`. All operations (hashing, I/O, parsing,
+  extraction, verification) are expressible in safe Rust; use safe
+  alternatives for any dependency that would require `unsafe` elsewhere.
+
+  The **sole permitted exception** is `src/ffi.rs` (feature-gated: `ffi`).
+  C FFI is structurally `unsafe` and cannot be written without it.
+  All other source files — including any module added in the future —
+  must be `unsafe`-free without exception.  See the
+  [FFI Safety Contract](#ffi-safety-contract) section for the rules
+  that govern `src/ffi.rs`.
+
+### FFI Safety Contract
+
+`src/ffi.rs` is the **only** file in this crate permitted to contain
+`unsafe` code.  Every rule below is mandatory — a violation is a bug,
+not a style preference.
+
+#### 1. Containment — no `unsafe` leaks out of `ffi.rs`
+
+- `unsafe` blocks, `unsafe fn`, and `unsafe impl` are banned in every
+  other source file.
+- `ffi.rs` must never re-export types or functions that carry `unsafe`
+  semantics into the rest of the crate.
+- The `ffi` feature gate must remain on the entire module; `unsafe` must
+  never become reachable when the feature is off.
+
+#### 2. Every `unsafe fn` must document its contract
+
+Every exported `unsafe extern "C" fn` must carry a `# Safety` doc
+section that states, for each raw-pointer parameter:
+
+- what value is valid (e.g. "null or a pointer returned by
+  `cnc_session_open`")
+- what the caller must guarantee about lifetime (e.g. "must not be used
+  after `cnc_session_free`")
+- whether exclusive access is required (e.g. mutable session operations)
+
+#### 3. Every `unsafe {}` block must have an inline `// SAFETY:` comment
+
+The comment must explain why the operation is sound at that specific
+call site — not a generic description of the type.  A reviewer must be
+able to verify correctness by reading the comment alone.
+
+```rust
+// Good — explains the invariant at this call site:
+// SAFETY: session is non-null (checked above) and caller guarantees
+//         no concurrent access.
+let s = unsafe { &*session };
+
+// Bad — just restates the type:
+// SAFETY: raw pointer dereference
+let s = unsafe { &*session };
+```
+
+#### 4. Null-check every pointer before any dereference
+
+Every raw-pointer parameter must be checked for null at the top of the
+function body, before any other logic.  Return the appropriate error
+code (`CNC_ERR_NULL_POINTER`) or a null pointer / no-op for `void`
+functions.  There are no exceptions — not even when a non-null value
+"seems obvious" from the call site.
+
+```rust
+// Required pattern:
+if session.is_null() {
+    return CNC_ERR_NULL_POINTER;
+}
+// … then dereference
+```
+
+#### 5. Ownership must be explicit and exhaustive
+
+The public ABI has exactly two ownership rules — document both at every
+function that is affected:
+
+| Allocation site          | Ownership rule                                                           |
+| ------------------------ | ------------------------------------------------------------------------ |
+| `cnc_session_open`       | Caller owns the opaque pointer; must call `cnc_session_free` exactly once |
+| `rust_str_to_cstring`    | Caller owns the returned `*mut c_char`; must call `cnc_string_free` exactly once |
+
+No other `*mut` value is allocated by this API.  If a new allocation is
+introduced, document its ownership rule in this table before merging.
+
+#### 6. Callback function pointers must be `Option`-wrapped
+
+FFI callbacks must always be declared as `Option<unsafe extern "C" fn(…)>`
+so that Rust enforces the null-check via the `Option` type.  Never accept
+a raw `unsafe extern "C" fn(…)` parameter directly.
+
+#### 7. Tests must cover null safety for every exported function
+
+The test suite in `ffi.rs` must include a single test (or extend the
+existing `null_session_returns_errors` test) that calls every exported
+`cnc_*` function with its pointer arguments set to null and verifies:
+
+- no panic / no crash
+- the expected return value (error code or null pointer)
+
+When a new exported function is added, its null-safety case must be
+added to this test in the same commit.
+
+#### 8. No `unsafe impl`
+
+`unsafe impl` is unconditionally banned — including `Send` and `Sync`
+impls for FFI types.  If a type genuinely needs a `Send` or `Sync` impl,
+document the proof of thread-safety as a code comment and open a design
+review rather than asserting it silently with `unsafe impl`.
 
 ### Lifetime Naming
 

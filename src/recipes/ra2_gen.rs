@@ -11,7 +11,7 @@ use crate::actions::FileMapping;
 /// names on disk use mixed case but are accessed case-insensitively
 /// on Windows; we use the on-disk case for `from` and the expected
 /// content-root case for `to`.
-pub(super) static RA2_BASE_COPY: [FileMapping; 3] = [
+pub(crate) static RA2_BASE_COPY: [FileMapping; 3] = [
     FileMapping {
         from: "ra2.mix",
         to: "ra2.mix",
@@ -27,7 +27,7 @@ pub(super) static RA2_BASE_COPY: [FileMapping; 3] = [
 ];
 
 /// Yuri's Revenge expansion files — direct copy.
-pub(super) static RA2_YR_COPY: [FileMapping; 2] = [
+pub(crate) static RA2_YR_COPY: [FileMapping; 2] = [
     FileMapping {
         from: "ra2md.mix",
         to: "ra2md.mix",
@@ -42,13 +42,13 @@ pub(super) static RA2_YR_COPY: [FileMapping; 2] = [
 ///
 /// The Steam TUC stores this as `THEME.MIX` (uppercase); the content root
 /// expects lowercase `theme.mix`.
-pub(super) static RA2_MUSIC_COPY: [FileMapping; 1] = [FileMapping {
+pub(crate) static RA2_MUSIC_COPY: [FileMapping; 1] = [FileMapping {
     from: "THEME.MIX",
     to: "theme.mix",
 }];
 
 /// RA2 movies — direct copy (Steam/Origin TUC, lowercase filenames).
-pub(super) static RA2_MOVIES_COPY: [FileMapping; 1] = [FileMapping {
+pub(crate) static RA2_MOVIES_COPY: [FileMapping; 1] = [FileMapping {
     from: "ra2.vqa",
     to: "ra2.vqa",
 }];
@@ -57,7 +57,7 @@ pub(super) static RA2_MOVIES_COPY: [FileMapping; 1] = [FileMapping {
 ///
 /// The retail disc and The First Decade DVD store MIX archives with
 /// uppercase DOS names, unlike the lowercase Steam/Origin TUC builds.
-pub(super) static RA2_DISC_BASE_COPY: [FileMapping; 3] = [
+pub(crate) static RA2_DISC_BASE_COPY: [FileMapping; 3] = [
     FileMapping {
         from: "RA2.MIX",
         to: "ra2.mix",
@@ -73,7 +73,7 @@ pub(super) static RA2_DISC_BASE_COPY: [FileMapping; 3] = [
 ];
 
 /// Yuri's Revenge — disc / TFD layout (uppercase filenames).
-pub(super) static RA2_DISC_YR_COPY: [FileMapping; 2] = [
+pub(crate) static RA2_DISC_YR_COPY: [FileMapping; 2] = [
     FileMapping {
         from: "RA2MD.MIX",
         to: "ra2md.mix",
@@ -85,7 +85,7 @@ pub(super) static RA2_DISC_YR_COPY: [FileMapping; 2] = [
 ];
 
 /// RA2 movies — disc / TFD layout (uppercase filenames).
-pub(super) static RA2_DISC_MOVIES_COPY: [FileMapping; 1] = [FileMapping {
+pub(crate) static RA2_DISC_MOVIES_COPY: [FileMapping; 1] = [FileMapping {
     from: "RA2.VQA",
     to: "ra2.vqa",
 }];
@@ -99,7 +99,7 @@ pub(super) static RA2_DISC_MOVIES_COPY: [FileMapping; 1] = [FileMapping {
 /// The Steam TUC merges base Generals and Zero Hour into a single install
 /// directory. All BIG archives are in the root alongside loose files in
 /// Data/. We copy only the three archives listed as test_files for GenBase.
-pub(super) static GEN_BASE_COPY: [FileMapping; 3] = [
+pub(crate) static GEN_BASE_COPY: [FileMapping; 3] = [
     FileMapping {
         from: "INI.big",
         to: "INI.big",
@@ -119,7 +119,7 @@ pub(super) static GEN_BASE_COPY: [FileMapping; 3] = [
 /// The retail Zero Hour disc has standalone expansion archives. The
 /// Steam/Origin TUC merges these into the base archives, so this
 /// mapping is only used for the `GenZhDisc` source.
-pub(super) static GEN_ZH_COPY: [FileMapping; 2] = [
+pub(crate) static GEN_ZH_COPY: [FileMapping; 2] = [
     FileMapping {
         from: "INIZH.big",
         to: "INIZH.big",

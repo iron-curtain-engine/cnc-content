@@ -355,6 +355,9 @@ mod tests {
     }
 
     /// Verifies domain extraction from HTTP URLs.
+    ///
+    /// Both `http://` and `https://` mirrors appear in the wild; the
+    /// extractor must handle both schemes to keep progress labels readable.
     #[test]
     fn extract_domain_http() {
         assert_eq!(
@@ -364,6 +367,9 @@ mod tests {
     }
 
     /// Verifies that a bare hostname with no path is returned as-is.
+    ///
+    /// Mirror URLs occasionally omit the path component; treating the whole
+    /// URL as a domain would produce an unreadably long progress label.
     #[test]
     fn extract_domain_no_path() {
         assert_eq!(extract_domain("https://example.com"), "example.com");
@@ -379,6 +385,9 @@ mod tests {
     }
 
     /// Verifies domain extraction from URLs with port numbers.
+    ///
+    /// Community mirrors sometimes run on non-standard ports; the port must
+    /// be kept in the label so the user can distinguish mirrors that share a hostname.
     #[test]
     fn extract_domain_with_port() {
         assert_eq!(

@@ -33,7 +33,7 @@
 //!    [`record_failure()`](MirrorHealthTracker::record_failure).
 //! 2. Before starting a download, call [`ranked_urls()`](MirrorHealthTracker::ranked_urls)
 //!    to get mirrors sorted by health score (highest first).
-//! 3. Optionally call [`prune()`](MirrorHealthTracker::prune) to remove
+//! 3. Optionally call [`filter_available()`](MirrorHealthTracker::filter_available) to remove
 //!    stale entries.
 
 use std::collections::HashMap;
@@ -255,7 +255,10 @@ mod tests {
 
     // ── MirrorHealth ────────────────────────────────────────────────
 
-    /// New mirror has zero counters.
+    /// A newly created `MirrorHealth` starts with all counters at zero.
+    ///
+    /// The initial state must not bias the ranking algorithm — a mirror that
+    /// has never been tried should start neutral, not penalized or preferred.
     #[test]
     fn new_mirror_health_defaults() {
         let h = MirrorHealth::new();
@@ -298,7 +301,10 @@ mod tests {
 
     // ── MirrorHealthTracker ─────────────────────────────────────────
 
-    /// Empty tracker returns default scores.
+    /// An empty tracker reports zero mirrors.
+    ///
+    /// The tracker must start in a clean state so that the first mirror
+    /// observation is not confused with a previous session's data.
     #[test]
     fn empty_tracker_default_scores() {
         let tracker = MirrorHealthTracker::new();
@@ -345,7 +351,10 @@ mod tests {
         assert_eq!(ranked[0], "https://good.example.com/f");
     }
 
-    /// Cooling-off mirrors are filtered out by filter_available.
+    /// Cooling-off mirrors are removed from the available pool.
+    ///
+    /// The downloader must not retry a mirror that is known to be failing;
+    /// including it would waste time and delay the user's download.
     #[test]
     fn filter_available_excludes_cooloff() {
         let mut tracker = MirrorHealthTracker::new();
@@ -362,7 +371,11 @@ mod tests {
         assert_eq!(available[0], "https://alive.example.com/f");
     }
 
-    /// Cooling-off expires after the backoff duration.
+    /// A mirror's cool-off period expires after the base backoff duration.
+    ///
+    /// Mirrors must eventually re-enter the available pool after a transient
+    /// failure; permanent exclusion would shrink the active mirror set to
+    /// zero after enough flaky responses.
     #[test]
     fn cooloff_expires() {
         let now = Instant::now();

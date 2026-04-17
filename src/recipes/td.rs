@@ -18,7 +18,7 @@ use crate::actions::FileMapping;
 /// Used for disc, Steam C&C (AppId 2229830), and Origin C&C editions.
 /// All files are uppercase on disk (DOS convention preserved by digital
 /// storefronts). Target names are lowercase for the managed content root.
-pub(super) static TD_BASE_COPY: [FileMapping; 9] = [
+pub(crate) static TD_BASE_COPY: [FileMapping; 9] = [
     FileMapping {
         from: "CONQUER.MIX",
         to: "conquer.mix",
@@ -59,7 +59,7 @@ pub(super) static TD_BASE_COPY: [FileMapping; 9] = [
 
 /// TD base from Remastered — same nine MIX files but nested under the
 /// Remastered Collection's deep directory structure.
-pub(super) static TD_REMASTERED_BASE_COPY: [FileMapping; 9] = [
+pub(crate) static TD_REMASTERED_BASE_COPY: [FileMapping; 9] = [
     FileMapping {
         from: "Data/CNCDATA/TIBERIAN_DAWN/CD1/CONQUER.MIX",
         to: "conquer.mix",
@@ -103,7 +103,7 @@ pub(super) static TD_REMASTERED_BASE_COPY: [FileMapping; 9] = [
 /// Covert Operations expansion MIX files — direct copy.
 ///
 /// Present on the Covert Ops disc and in Steam/Origin C&C installs.
-pub(super) static TD_COVERT_OPS_COPY: [FileMapping; 2] = [
+pub(crate) static TD_COVERT_OPS_COPY: [FileMapping; 2] = [
     FileMapping {
         from: "SC-000.MIX",
         to: "sc-000.mix",
@@ -120,7 +120,7 @@ pub(super) static TD_COVERT_OPS_COPY: [FileMapping; 2] = [
 ///
 /// The music archive is also part of TdBase, but this mapping allows
 /// extracting music independently from a source that only provides it.
-pub(super) static TD_MUSIC_COPY: [FileMapping; 1] = [FileMapping {
+pub(crate) static TD_MUSIC_COPY: [FileMapping; 1] = [FileMapping {
     from: "SCORES.MIX",
     to: "scores.mix",
 }];
@@ -132,7 +132,7 @@ pub(super) static TD_MUSIC_COPY: [FileMapping; 1] = [FileMapping {
 // are in a MOVIES/ subdirectory. Both map to movies/ in the content root.
 
 /// GDI campaign movies — from disc root (uppercase, no subdirectory).
-pub(super) static TD_MOVIES_GDI_DISC_COPY: [FileMapping; 5] = [
+pub(crate) static TD_MOVIES_GDI_DISC_COPY: [FileMapping; 5] = [
     FileMapping {
         from: "GDI1.VQA",
         to: "movies/gdi1.vqa",
@@ -156,7 +156,7 @@ pub(super) static TD_MOVIES_GDI_DISC_COPY: [FileMapping; 5] = [
 ];
 
 /// Nod campaign movies — from disc root (uppercase, no subdirectory).
-pub(super) static TD_MOVIES_NOD_DISC_COPY: [FileMapping; 5] = [
+pub(crate) static TD_MOVIES_NOD_DISC_COPY: [FileMapping; 5] = [
     FileMapping {
         from: "NOD1.VQA",
         to: "movies/nod1.vqa",
@@ -180,7 +180,7 @@ pub(super) static TD_MOVIES_NOD_DISC_COPY: [FileMapping; 5] = [
 ];
 
 /// GDI campaign movies — from Steam/Origin MOVIES/ subdirectory.
-pub(super) static TD_MOVIES_GDI_STEAM_COPY: [FileMapping; 5] = [
+pub(crate) static TD_MOVIES_GDI_STEAM_COPY: [FileMapping; 5] = [
     FileMapping {
         from: "MOVIES/GDI1.VQA",
         to: "movies/gdi1.vqa",
@@ -204,7 +204,7 @@ pub(super) static TD_MOVIES_GDI_STEAM_COPY: [FileMapping; 5] = [
 ];
 
 /// Nod campaign movies — from Steam/Origin MOVIES/ subdirectory.
-pub(super) static TD_MOVIES_NOD_STEAM_COPY: [FileMapping; 5] = [
+pub(crate) static TD_MOVIES_NOD_STEAM_COPY: [FileMapping; 5] = [
     FileMapping {
         from: "MOVIES/NOD1.VQA",
         to: "movies/nod1.vqa",

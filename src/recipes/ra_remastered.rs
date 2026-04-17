@@ -9,7 +9,7 @@
 
 use crate::actions::FileMapping;
 
-pub(super) static CS_MUSIC_COPY: [FileMapping; 8] = [
+pub(crate) static CS_MUSIC_COPY: [FileMapping; 8] = [
     FileMapping {
         from: "expand/2nd_hand.aud",
         to: "expand/2nd_hand.aud",
@@ -45,7 +45,7 @@ pub(super) static CS_MUSIC_COPY: [FileMapping; 8] = [
 ];
 
 /// Aftermath music — direct copy.
-pub(super) static AM_MUSIC_COPY: [FileMapping; 9] = [
+pub(crate) static AM_MUSIC_COPY: [FileMapping; 9] = [
     FileMapping {
         from: "expand/await.aud",
         to: "expand/await.aud",
@@ -87,7 +87,7 @@ pub(super) static AM_MUSIC_COPY: [FileMapping; 9] = [
 // ── Remastered layout ─────────────────────────────────────────────────
 // Remastered stores files under Data/CNCDATA/RED_ALERT/{CD1,CD2}/.
 
-pub(super) static REMASTERED_BASE_COPY: [FileMapping; 11] = [
+pub(crate) static REMASTERED_BASE_COPY: [FileMapping; 11] = [
     FileMapping {
         from: "Data/CNCDATA/RED_ALERT/CD1/allies.mix",
         to: "allies.mix",
@@ -134,7 +134,7 @@ pub(super) static REMASTERED_BASE_COPY: [FileMapping; 11] = [
     },
 ];
 
-pub(super) static REMASTERED_AFTERMATH_COPY: [FileMapping; 27] = [
+pub(crate) static REMASTERED_AFTERMATH_COPY: [FileMapping; 27] = [
     FileMapping {
         from: "Data/CNCDATA/RED_ALERT/AFTERMATH/expand2.mix",
         to: "expand/expand2.mix",
@@ -245,7 +245,7 @@ pub(super) static REMASTERED_AFTERMATH_COPY: [FileMapping; 27] = [
     },
 ];
 
-pub(super) static REMASTERED_CS_MUSIC_COPY: [FileMapping; 8] = [
+pub(crate) static REMASTERED_CS_MUSIC_COPY: [FileMapping; 8] = [
     FileMapping {
         from: "Data/CNCDATA/RED_ALERT/COUNTERSTRIKE/2nd_hand.aud",
         to: "expand/2nd_hand.aud",
@@ -280,7 +280,7 @@ pub(super) static REMASTERED_CS_MUSIC_COPY: [FileMapping; 8] = [
     },
 ];
 
-pub(super) static REMASTERED_AM_MUSIC_COPY: [FileMapping; 9] = [
+pub(crate) static REMASTERED_AM_MUSIC_COPY: [FileMapping; 9] = [
     FileMapping {
         from: "Data/CNCDATA/RED_ALERT/AFTERMATH/await.aud",
         to: "expand/await.aud",

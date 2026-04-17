@@ -19,7 +19,7 @@ use crate::actions::{FileMapping, InstallAction};
 /// The First Decade DVD stores RA (and other games) inside an InstallShield
 /// CAB archive split across five data volumes. The header file `data1.hdr`
 /// describes the archive layout; the five `.cab` volumes contain the data.
-pub(super) static TFD_VOLUMES: [(u32, &str); 5] = [
+pub(crate) static TFD_VOLUMES: [(u32, &str); 5] = [
     (1, "data1.cab"),
     (2, "data2.cab"),
     (3, "data3.cab"),
@@ -28,7 +28,7 @@ pub(super) static TFD_VOLUMES: [(u32, &str); 5] = [
 ];
 
 /// Allied movies: extract movies1.mix from MAIN.MIX → extract VQAs → cleanup.
-pub(super) static MOVIES_ALLIED_FROM_MAIN_MIX: [InstallAction; 3] = [
+pub(crate) static MOVIES_ALLIED_FROM_MAIN_MIX: [InstallAction; 3] = [
     InstallAction::ExtractMix {
         source_mix: "MAIN.MIX",
         entries: &[FileMapping {
@@ -46,7 +46,7 @@ pub(super) static MOVIES_ALLIED_FROM_MAIN_MIX: [InstallAction; 3] = [
 ];
 
 /// Soviet movies: extract movies2.mix from MAIN.MIX → extract VQAs → cleanup.
-pub(super) static MOVIES_SOVIET_FROM_MAIN_MIX: [InstallAction; 3] = [
+pub(crate) static MOVIES_SOVIET_FROM_MAIN_MIX: [InstallAction; 3] = [
     InstallAction::ExtractMix {
         source_mix: "MAIN.MIX",
         entries: &[FileMapping {
@@ -63,7 +63,7 @@ pub(super) static MOVIES_SOVIET_FROM_MAIN_MIX: [InstallAction; 3] = [
     },
 ];
 
-pub(super) static MOVIES_ALLIED_VQA_ENTRIES: [FileMapping; 51] = [
+pub(crate) static MOVIES_ALLIED_VQA_ENTRIES: [FileMapping; 51] = [
     FileMapping {
         from: "aagun.vqa",
         to: "movies/aagun.vqa",
@@ -270,7 +270,7 @@ pub(super) static MOVIES_ALLIED_VQA_ENTRIES: [FileMapping; 51] = [
     },
 ];
 
-pub(super) static MOVIES_SOVIET_VQA_ENTRIES: [FileMapping; 55] = [
+pub(crate) static MOVIES_SOVIET_VQA_ENTRIES: [FileMapping; 55] = [
     FileMapping {
         from: "aagun.vqa",
         to: "movies/aagun.vqa",
@@ -499,7 +499,7 @@ pub(super) static MOVIES_SOVIET_VQA_ENTRIES: [FileMapping; 55] = [
 // movies1.mix and movies2.mix is present — just at a deeper path.
 
 /// Allied movies from the Remastered Collection's nested MAIN.MIX.
-pub(super) static MOVIES_ALLIED_FROM_REMASTERED_MIX: [InstallAction; 3] = [
+pub(crate) static MOVIES_ALLIED_FROM_REMASTERED_MIX: [InstallAction; 3] = [
     InstallAction::ExtractMix {
         source_mix: "Data/CNCDATA/RED_ALERT/CD1/MAIN.MIX",
         entries: &[FileMapping {
@@ -517,7 +517,7 @@ pub(super) static MOVIES_ALLIED_FROM_REMASTERED_MIX: [InstallAction; 3] = [
 ];
 
 /// Soviet movies from the Remastered Collection's nested MAIN.MIX.
-pub(super) static MOVIES_SOVIET_FROM_REMASTERED_MIX: [InstallAction; 3] = [
+pub(crate) static MOVIES_SOVIET_FROM_REMASTERED_MIX: [InstallAction; 3] = [
     InstallAction::ExtractMix {
         source_mix: "Data/CNCDATA/RED_ALERT/CD1/MAIN.MIX",
         entries: &[FileMapping {
@@ -538,14 +538,14 @@ pub(super) static MOVIES_SOVIET_FROM_REMASTERED_MIX: [InstallAction; 3] = [
 // The Aftermath disc has a PATCH.RTP that contains expansion files at
 // raw byte offsets, plus loose files.
 
-pub(super) static AFTERMATH_DISC_ACTIONS: [InstallAction; 1] = [InstallAction::Copy {
+pub(crate) static AFTERMATH_DISC_ACTIONS: [InstallAction; 1] = [InstallAction::Copy {
     files: &AFTERMATH_EXPAND_COPY,
 }];
 
-pub(super) static AFTERMATH_DISC_MUSIC_ACTIONS: [InstallAction; 1] = [InstallAction::Copy {
+pub(crate) static AFTERMATH_DISC_MUSIC_ACTIONS: [InstallAction; 1] = [InstallAction::Copy {
     files: &AM_MUSIC_COPY,
 }];
 
-pub(super) static CS_DISC_MUSIC_ACTIONS: [InstallAction; 1] = [InstallAction::Copy {
+pub(crate) static CS_DISC_MUSIC_ACTIONS: [InstallAction; 1] = [InstallAction::Copy {
     files: &CS_MUSIC_COPY,
 }];

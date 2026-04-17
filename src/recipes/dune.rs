@@ -18,7 +18,7 @@ use crate::actions::FileMapping;
 /// The complete set of files needed to run Dune II. Includes the main
 /// executable, scenario data, sound, and house-specific archives.
 /// File names are preserved in uppercase to match DOSBox expectations.
-pub(super) static DUNE2_BASE_COPY: [FileMapping; 7] = [
+pub(crate) static DUNE2_BASE_COPY: [FileMapping; 7] = [
     FileMapping {
         from: "DUNE2.EXE",
         to: "DUNE2.EXE",
@@ -55,7 +55,7 @@ pub(super) static DUNE2_BASE_COPY: [FileMapping; 7] = [
 ///
 /// Includes the main executable, setup data, font, icon resources,
 /// and mouse cursor sprites. File names preserved in uppercase.
-pub(super) static DUNE2000_BASE_COPY: [FileMapping; 5] = [
+pub(crate) static DUNE2000_BASE_COPY: [FileMapping; 5] = [
     FileMapping {
         from: "DUNE2000.EXE",
         to: "DUNE2000.EXE",

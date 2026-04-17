@@ -23,7 +23,7 @@ use std::collections::HashSet;
 #[test]
 fn all_recipe_sources_exist() {
     let known_sources: HashSet<SourceId> = ALL_SOURCES.iter().map(|s| s.id).collect();
-    for recipe in ALL_RECIPES {
+    for recipe in ALL_RECIPES.iter() {
         assert!(
             known_sources.contains(&recipe.source),
             "recipe references unknown source {:?} for package {:?}",
@@ -33,11 +33,14 @@ fn all_recipe_sources_exist() {
     }
 }
 
-/// Every recipe references a package ID that exists in ALL_PACKAGES.
+/// Every recipe references a package ID that exists in `ALL_PACKAGES`.
+///
+/// A recipe pointing to an unknown package ID would silently be skipped
+/// by the executor, leaving required content uninstalled with no error.
 #[test]
 fn all_recipe_packages_exist() {
     let known_packages: HashSet<PackageId> = ALL_PACKAGES.iter().map(|p| p.id).collect();
-    for recipe in ALL_RECIPES {
+    for recipe in ALL_RECIPES.iter() {
         assert!(
             known_packages.contains(&recipe.package),
             "recipe references unknown package {:?} from source {:?}",
@@ -54,7 +57,7 @@ fn all_recipe_packages_exist() {
 #[test]
 fn no_duplicate_recipes() {
     let mut seen = HashSet::new();
-    for recipe in ALL_RECIPES {
+    for recipe in ALL_RECIPES.iter() {
         let key = (recipe.source, recipe.package);
         assert!(
             seen.insert(key),
@@ -71,7 +74,7 @@ fn no_duplicate_recipes() {
 /// misleads the user into thinking content was installed.
 #[test]
 fn all_recipes_have_actions() {
-    for recipe in ALL_RECIPES {
+    for recipe in ALL_RECIPES.iter() {
         assert!(
             !recipe.actions.is_empty(),
             "recipe source {:?} × package {:?} has zero actions",
@@ -118,6 +121,10 @@ fn every_package_source_has_recipe() {
 // ── Per-game recipe counts ──────────────────────────────────────────
 
 /// Red Alert has recipes covering all its source-package combinations.
+///
+/// The minimum count acts as a regression guard — silently deleting or
+/// merging recipe files would reduce the count below the threshold and
+/// fail here before any content becomes uninstallable at runtime.
 #[test]
 fn ra_recipe_count() {
     let ra_recipes: Vec<_> = ALL_RECIPES
@@ -137,6 +144,9 @@ fn ra_recipe_count() {
 }
 
 /// Tiberian Dawn has recipes for all its sources.
+///
+/// Same regression-guard rationale as `ra_recipe_count`: the floor catches
+/// accidental recipe loss before it reaches users.
 #[test]
 fn td_recipe_count() {
     let td_recipes: Vec<_> = ALL_RECIPES
@@ -156,6 +166,9 @@ fn td_recipe_count() {
 }
 
 /// Tiberian Sun has recipes for all its sources.
+///
+/// Same regression-guard rationale as `ra_recipe_count`: the floor catches
+/// accidental recipe loss before it reaches users.
 #[test]
 fn ts_recipe_count() {
     let ts_recipes: Vec<_> = ALL_RECIPES
@@ -174,6 +187,10 @@ fn ts_recipe_count() {
 }
 
 /// Dune 2 and Dune 2000 each have recipes for disc and GOG sources.
+///
+/// These are local-source-only games with a fixed, small source set; an
+/// exact count (not a floor) is appropriate because every combination
+/// must be covered and none should be silently added.
 #[test]
 fn dune_recipe_count() {
     let dune_recipes: Vec<_> = ALL_RECIPES
@@ -190,6 +207,9 @@ fn dune_recipe_count() {
 }
 
 /// RA2 and Generals have recipes for all their sources.
+///
+/// Same regression-guard rationale as `ra_recipe_count`: the floor catches
+/// accidental recipe loss before it reaches users.
 #[test]
 fn ra2_gen_recipe_count() {
     let ra2_gen_recipes: Vec<_> = ALL_RECIPES

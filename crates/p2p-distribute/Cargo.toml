@@ -21,9 +21,19 @@ thiserror = "2.0"
 # HTTP web seed peer (BEP 19 — fetch pieces via Range requests)
 ureq = { version = "3", optional = true }
 
+# CLI binary dependencies (feature-gated: cli)
+clap = { version = "4", features = ["derive", "wrap_help"], optional = true }
+mimalloc = { version = "0.1", optional = true }
+
 [dev-dependencies]
 tempfile = "3"
 
 [features]
 default = ["http"]
 http = ["dep:ureq"]
+cli = ["dep:clap", "dep:mimalloc", "http"]
+
+[[bin]]
+name = "p2p-distribute"
+path = "src/bin/main.rs"
+required-features = ["cli"]

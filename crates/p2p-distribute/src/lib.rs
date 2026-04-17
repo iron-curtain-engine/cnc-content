@@ -345,7 +345,7 @@ pub use webseed::WebSeedPeer;
 /// Uses a direct lookup table instead of `fmt::Write` to avoid the
 /// formatting machinery overhead. Each byte maps to two ASCII hex
 /// digits via nibble extraction — no branching, no format parsing.
-pub(crate) fn hex_encode(bytes: &[u8]) -> String {
+pub fn hex_encode(bytes: &[u8]) -> String {
     const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut hex = Vec::with_capacity(bytes.len().saturating_mul(2));
     for &b in bytes {

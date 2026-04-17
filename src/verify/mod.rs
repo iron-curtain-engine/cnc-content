@@ -133,6 +133,9 @@ pub fn sha1_file(path: &Path, prefix_length: Option<u64>) -> Result<String, io::
 
     match prefix_length {
         Some(len) => {
+            // Heap allocation here is intentional: prefix_length comes from
+            // IdFileCheck config and is unbounded. Source identification runs
+            // at most once per session, so this is not a hot path.
             let mut buf = vec![0u8; len as usize];
             file.read_exact(&mut buf)?;
             hasher.update(&buf);
@@ -177,7 +180,7 @@ pub fn blake3_file(path: &Path) -> Result<String, io::Error> {
         hasher.update(buf.get(..n).unwrap_or(&[]));
     }
 
-    Ok(hasher.finalize().to_hex().to_string())
+    Ok(hex_encode(hasher.finalize().as_bytes()))
 }
 
 /// Encodes a byte slice as lowercase hex.
@@ -275,7 +278,7 @@ impl Blake3Scratch {
             }
         }
 
-        Ok(self.hasher.finalize().to_hex().to_string())
+        Ok(hex_encode(self.hasher.finalize().as_bytes()))
     }
 }
 
@@ -313,6 +316,7 @@ fn verify_installed_content_sequential(
         let full_path = content_root.join(rel_path);
         match scratch.hash_file(&full_path) {
             Ok(actual) if actual == expected.blake3 => {}
+            // Clone only on failure — the common case (match) allocates nothing.
             _ => failures.push(rel_path.clone()),
         }
     }
@@ -337,6 +341,7 @@ fn verify_installed_content_parallel(
             let mut scratch = Blake3Scratch::new();
             match scratch.hash_file(&full_path) {
                 Ok(actual) if actual == expected.blake3 => None,
+                // Clone only on failure — the common case (match) allocates nothing.
                 _ => Some((*rel_path).clone()),
             }
         })
