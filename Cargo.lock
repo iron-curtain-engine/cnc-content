@@ -426,6 +426,7 @@ dependencies = [
 [[package]]
 name = "cnc-formats"
 version = "0.1.0-alpha.5"
+source = "git+https://github.com/iron-curtain-engine/cnc-formats#77da596ed72a1201740e054855bf2ff60640bfa9"
 dependencies = [
  "base64",
  "blowfish",

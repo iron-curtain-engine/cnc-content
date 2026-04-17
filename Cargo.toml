@@ -35,7 +35,11 @@ required-features = ["cli"]
 
 [dependencies]
 app-path = "1.1"
-cnc-formats = { path = "../cnc-formats", default-features = false, features = [
+# cnc-formats = { path = "../cnc-formats", default-features = false, features = [
+#     "encrypted-mix",
+#     "meg",
+# ] }
+cnc-formats = { git = "https://github.com/iron-curtain-engine/cnc-formats", default-features = false, features = [
     "encrypted-mix",
     "meg",
 ] }
