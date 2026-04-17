@@ -150,18 +150,15 @@ impl StealableTask {
             // Bisect: owner keeps lower half, thief gets upper half.
             // Align midpoint up to min_chunk_size boundary for I/O efficiency.
             let raw_mid = current_start.saturating_add(remaining / 2);
-            let midpoint = if min_chunk_size > 0 {
-                // Round up to nearest min_chunk_size boundary.
-                let aligned = (raw_mid.saturating_add(min_chunk_size.saturating_sub(1)))
-                    / min_chunk_size
-                    * min_chunk_size;
-                // Clamp to valid range: must be > current_start and < current_end.
-                aligned
-                    .min(current_end.saturating_sub(1))
-                    .max(current_start.saturating_add(1))
-            } else {
-                raw_mid
-            };
+            // Round up to nearest min_chunk_size boundary, then clamp to valid range.
+            let midpoint = (raw_mid.saturating_add(min_chunk_size.saturating_sub(1)))
+                .checked_div(min_chunk_size)
+                .map(|q| {
+                    (q * min_chunk_size)
+                        .min(current_end.saturating_sub(1))
+                        .max(current_start.saturating_add(1))
+                })
+                .unwrap_or(raw_mid);
 
             // Sanity: midpoint must leave something for both sides.
             if midpoint <= current_start || midpoint >= current_end {
@@ -307,7 +304,7 @@ impl WorkStealingScheduler {
             .collect();
 
         // Sort by remaining (descending) — steal from the slowest thread.
-        candidates.sort_by(|a, b| b.1.cmp(&a.1));
+        candidates.sort_by_key(|b| std::cmp::Reverse(b.1));
 
         for (victim_idx, _) in candidates {
             if let Some(task) = self.tasks.get(victim_idx) {

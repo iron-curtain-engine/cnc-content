@@ -198,7 +198,7 @@ impl TieringStorage {
 
         // Sort by last_read ascending (oldest first = coldest).
         // `None` (never read) sorts before `Some` — those are the coldest.
-        hot_pieces.sort_by(|a, b| a.1.cmp(&b.1));
+        hot_pieces.sort_by_key(|a| a.1);
         hot_pieces.truncate(n);
         hot_pieces.iter().map(|(idx, _)| *idx).collect()
     }

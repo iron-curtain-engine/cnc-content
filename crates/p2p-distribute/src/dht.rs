@@ -242,7 +242,7 @@ impl RoutingTable {
             .collect();
 
         // Sort by XOR distance (lexicographic comparison of byte arrays).
-        all_entries.sort_by(|a, b| a.1.cmp(&b.1));
+        all_entries.sort_by_key(|a| a.1);
 
         all_entries
             .into_iter()

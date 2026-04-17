@@ -301,7 +301,7 @@ impl PeerPool {
             .iter()
             .filter(|e| e.state == PeerState::Active)
             .collect();
-        active.sort_by(|a, b| b.score.cmp(&a.score));
+        active.sort_by_key(|b| std::cmp::Reverse(b.score));
         active
     }
 

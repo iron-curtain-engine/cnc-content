@@ -199,7 +199,7 @@ impl ChokingStrategy for TitForTatChoking {
             .collect();
 
         // Sort descending by speed.
-        ranked.sort_by(|a, b| b.1.cmp(&a.1));
+        ranked.sort_by_key(|b| std::cmp::Reverse(b.1));
 
         // Step 2: Determine effective slot count.
         let mut slots = self.regular_slots;
